@@ -21,7 +21,7 @@ keywords = ["netgear", "plus", "switch", "api", "library"]
 dependencies = ["requests", "lxml"]
 
 [project.scripts]
-ngp-cli = "py_netgear_plus_cli:main"
+ngp-cli = "py_netgear_plus.ngp_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/foxey/py-netgear-plus"

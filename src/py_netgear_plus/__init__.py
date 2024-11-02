@@ -12,7 +12,7 @@ from lxml import html
 
 from . import models, netgear_crypt
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 SWITCH_STATES = ["on", "off"]
 DEFAULT_PAGE = "index.htm"
@@ -330,12 +330,13 @@ Response from switch: "%s"',
         """Logout and delete cookie."""
         """Only used while testing. Prevents "Maximum number of sessions" error."""
         try:
-            self.fetch_page(self.switch_model.LOGOUT_TEMPLATES)
+            response = self.fetch_page(self.switch_model.LOGOUT_TEMPLATES)
         except requests.exceptions.ConnectionError:
             self.cookie_name = None
             self.cookie_content = None
             return True
-        return False
+        else:
+            return response.status_code == requests.codes.ok
 
     def _request(
         self,

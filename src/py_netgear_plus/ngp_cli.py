@@ -129,7 +129,7 @@ def main() -> None:
         logging.basicConfig(level=logging.DEBUG)
         print("Enabling debug mode.", file=stderr)  # noqa: T201
 
-    if not args.password and args.command != "identify":
+    if not args.password and args.command not in ["identify", "logout"]:
         print(  # noqa: T201
             "Password is required. Use --password or set"
             " NETGEAR_PLUS_PASSWORD environment variable.",

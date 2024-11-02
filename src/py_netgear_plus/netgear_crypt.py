@@ -6,8 +6,12 @@ import hashlib
 def merge(str1: str, str2: str) -> str:
     """Merge two strings by alternating characters from each string."""
     result = ""
-    arr1 = list(str1)
-    arr2 = list(str2)
+    arr1 = []
+    arr2 = []
+    if str1:
+        arr1 = list(str1)
+    if str2:
+        arr2 = list(str2)
     index1 = 0
     index2 = 0
     while (index1 < len(arr1)) | (index2 < len(arr2)):
