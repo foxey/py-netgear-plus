@@ -1,6 +1,6 @@
 colorlog==6.9.0
 ruff==0.7.3
-hatchling==1.26.1
+hatchling==1.26.3
 build==1.2.2.post1
 pytest==8.3.3
 pytest-cov==6.0.0
