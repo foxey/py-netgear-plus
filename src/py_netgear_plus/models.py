@@ -166,6 +166,11 @@ class GS30xSeries(AutodetectedSwitchModel):
             "ACTION": "Apply",
             "portID": poe_port - 1,
             "ADMIN_MODE": 1 if state == "on" else 0,
+            "PORT_PRIO": 0,
+            "POW_MOD": 3,
+            "POW_LIMT_TYP": 0,
+            "DETEC_TYP": 2,
+            "DISCONNECT_TYP": 2,
         }
 
     def get_power_cycle_poe_port_data(self, poe_port: int) -> dict:
@@ -208,7 +213,7 @@ class GS316EP(GS30xSeries):
     SUPPORTED = False
     MODEL_NAME = "GS316EP"
     PORTS = 16
-    POE_PORTS_NOT_YET_IMPLEMENTED: ClassVar = [
+    POE_PORTS: ClassVar = [
         1,
         2,
         3,

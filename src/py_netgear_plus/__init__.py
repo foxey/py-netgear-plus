@@ -14,7 +14,7 @@ from . import models, netgear_crypt
 from .fetcher import BaseResponse, PageNotLoadedError
 from .parsers import PageParser, create_page_parser
 
-__version__ = "0.2.14"
+__version__ = "0.2.14rc0"
 
 SWITCH_STATES = ["on", "off"]
 DEFAULT_PAGE = "index.htm"
@@ -51,6 +51,14 @@ class SwitchModelNotDetectedError(Exception):
 
 class EmptyTemplateParameterError(Exception):
     """None of the models passed the tests."""
+
+
+class InvalidSwitchStateError(Exception):
+    """State should be one of the options in SWITCH_STATES."""
+
+
+class InvalidPoEPortError(Exception):
+    """Port is not a PoE port."""
 
 
 class NetgearSwitchConnector:
@@ -846,7 +854,8 @@ class NetgearSwitchConnector:
     def switch_poe_port(self, poe_port: int, state: str) -> bool:
         """Switch poe port on or off."""
         if state not in SWITCH_STATES:
-            return False
+            message = f'State "{state}" not in {SWITCH_STATES}.'
+            raise InvalidSwitchStateError(message)
         if poe_port in self.poe_ports:
             for template in self.switch_model.SWITCH_POE_PORT_TEMPLATES:
                 url = template["url"].format(ip=self.host)
@@ -863,6 +872,9 @@ class NetgearSwitchConnector:
                     "NetgearSwitchConnector.switch_poe_port response was %s",
                     resp.content.strip(),
                 )
+        else:
+            message = f"Port {poe_port} not in {self.poe_ports}"
+            raise InvalidPoEPortError(message)
         return False
 
     def turn_on_poe_port(self, poe_port: int) -> bool:
