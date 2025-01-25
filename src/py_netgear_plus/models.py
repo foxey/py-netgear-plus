@@ -13,6 +13,8 @@ class SwitchModelNotDetectedError(Exception):
 
 class PortNumberOutofRangeError(Exception):
     """Port number out of range."""
+
+
 class InvalidCryptFunctionError(Exception):
     """No implementation for the defined CRYPT_FUNCTION."""
 

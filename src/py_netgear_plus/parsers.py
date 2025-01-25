@@ -232,7 +232,6 @@ class PageParser:
 
         if self.has_api_v2():
             tree = html.fromstring(page.content)
-            _port_elems = tree.xpath('//tr[@class="portID"]/td[2]')
             portstatus_elems = tree.xpath('//tr[@class="portID"]/td[3]')
             portspeed_elems = tree.xpath('//tr[@class="portID"]/td[4]')
             portconnectionspeed_elems = tree.xpath('//tr[@class="portID"]/td[5]')
@@ -831,7 +830,6 @@ class GS105PE(PageParser):
         tree = html.fromstring(page.content)
 
         switch_name = get_first_value(tree, '//input[@id="switch_name"]')
-     
         switch_serial_number = get_text_from_next_element(
             tree, '//td[contains(text(),"Serial Number")]'
         )
@@ -857,7 +855,6 @@ class GS105PE(PageParser):
         status_by_port = {}
 
         tree = html.fromstring(page.content)
-        _port_elems = tree.xpath('//tr[@class="portID"]/td[2]')
         portstatus_elems = tree.xpath('//tr[@class="portID"]/td[4]')
         portspeed_elems = tree.xpath('//tr[@class="portID"]/td[5]')
         portconnectionspeed_elems = tree.xpath('//tr[@class="portID"]/td[6]')
@@ -893,9 +890,7 @@ class GS105PE(PageParser):
         self, page: Response | BaseResponse, ports: int
     ) -> dict[str, Any]:
         """Parse port statistics from the html page."""
-
         tree = html.fromstring(page.content)
-        port_elems = tree.xpath('//tr[@class="portID"]/td[1]')
         rx_hidden1_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][1]')
         rx_hidden2_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][2]')
         tx_hidden1_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][3]')
@@ -909,11 +904,12 @@ class GS105PE(PageParser):
         crc = []
 
         for i in range(ports):
-            port = int(port_elems[i].text)
-            bytes_received = int(rx_hidden1_elems[i].value) * int32_max + int(rx_hidden2_elems[i].value)
-            bytes_sent = int(tx_hidden1_elems[i].value) * int32_max + int(tx_hidden2_elems[i].value)
-            crc_error_packets = int(crc_hidden1_elems[i].value) * int32_max + int(crc_hidden2_elems[i].value)
-            
+            bytes_received = int(rx_hidden1_elems[i].value)\
+                * int32_max + int(rx_hidden2_elems[i].value)
+            bytes_sent = int(tx_hidden1_elems[i].value)\
+                * int32_max + int(tx_hidden2_elems[i].value)
+            crc_error_packets = int(crc_hidden1_elems[i].value)\
+                * int32_max + int(crc_hidden2_elems[i].value)
             rx.append(bytes_received)
             tx.append(bytes_sent)
             crc.append(crc_error_packets)
