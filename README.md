@@ -50,6 +50,7 @@ some basic configuration updates.
 | GS308EPP | 8     | V1.0.1.4                               |                     |
 | GS316EP  | 16    | V1.0.4.4                               |                     |
 | GS316EPP | 16    | V1.0.4.4                               |                     |
+| GS105PE  | 5     | V1.6.0.17                              | V1.6.0.2-VB         |
 
 Supported firmware languages: GR (German), EN (English)
 
