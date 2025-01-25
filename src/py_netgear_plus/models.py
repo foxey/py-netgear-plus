@@ -13,8 +13,6 @@ class SwitchModelNotDetectedError(Exception):
 
 class PortNumberOutofRangeError(Exception):
     """Port number out of range."""
-
-
 class InvalidCryptFunctionError(Exception):
     """No implementation for the defined CRYPT_FUNCTION."""
 
@@ -77,20 +75,20 @@ class AutodetectedSwitchModel:
         """Return list with detection functions."""
         return self.CHECKS_AND_RESULTS
 
-    def get_switch_poe_port_data(self, poe__port: int, state: str) -> dict:
+def get_switch_poe_port_data(self, poe__port: int, state: str) -> dict:
         """Return empty dict. Implement on model level."""
         del poe__port, state
         return {}
 
-    def get_power_cycle_poe_port_data(self, poe_port: int) -> dict:
-        """Return empty dict. Implement on model level."""
-        del poe_port
-        return {}
+def get_power_cycle_poe_port_data(self, poe_port: int) -> dict:
+    """Return empty dict. Implement on model level."""
+    del poe_port
+    return {}
 
-    def get_switch_led_data(self, state: str) -> dict:
-        """Return empty dict. Implement on model level."""
-        del state
-        return {}
+def get_switch_led_data(self, state: str) -> dict:
+    """Return empty dict. Implement on model level."""
+    del state
+    return {}
 
 
 class GS105E(AutodetectedSwitchModel):
@@ -465,6 +463,27 @@ class JGS524Ev2(AutodetectedSwitchModel):
         }
     ]
 
+class GS105PE(AutodetectedSwitchModel):
+    """Definition for Netgear CG105Ev2 model."""
+
+    MODEL_NAME = "GS105PE"
+    PORTS = 5
+    CHECKS_AND_RESULTS: ClassVar = [
+        ("check_login_form_rand", [True]),
+        ("parse_login_title_tag", ["GS105PE"]),
+    ]
+
+    SWITCH_INFO_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/switch_info.cgi"}
+    ]
+
+    PORT_STATUS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/status.cgi"}
+    ]
+
+    PORT_STATISTICS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/portStatistics.cgi"}
+    ]
 
 MODELS = [
     GS105E,
@@ -479,4 +498,5 @@ MODELS = [
     GS316EP,
     GS316EPP,
     JGS524Ev2,
+    GS105PE
 ]

@@ -819,6 +819,114 @@ class JGS524Ev2(PageParser):
             return error_msg[0].text
         return None
 
+class GS105PE(PageParser):
+    """Parser for the GS105PE switch."""
+
+    def __init__(self) -> None:
+        """Initialize the GS105PE parser."""
+        super().__init__()
+
+    def parse_switch_metadata(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse switch info from the html page."""
+        tree = html.fromstring(page.content)
+
+        switch_name = get_first_value(tree, '//input[@id="switch_name"]')
+     
+        switch_serial_number = get_text_from_next_element(
+            tree, '//td[contains(text(),"Serial Number")]'
+        )
+        self._switch_bootloader = get_text_from_next_element(
+            tree, '//td[contains(text(),"Bootloader Version")]'
+        )
+
+        self._switch_firmware = get_text_from_next_element(
+            tree, '//td[contains(text(),"Firmware Version")]'
+        )
+
+        return {
+            "switch_name": switch_name,
+            "switch_serial_number": switch_serial_number,
+            "switch_bootloader": self._switch_bootloader,
+            "switch_firmware": self._switch_firmware,
+        }
+
+    def parse_port_status(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[int, dict[str, Any]]:
+        """Parse port status from the html page."""
+        status_by_port = {}
+
+        tree = html.fromstring(page.content)
+        _port_elems = tree.xpath('//tr[@class="portID"]/td[2]')
+        portstatus_elems = tree.xpath('//tr[@class="portID"]/td[4]')
+        portspeed_elems = tree.xpath('//tr[@class="portID"]/td[5]')
+        portconnectionspeed_elems = tree.xpath('//tr[@class="portID"]/td[6]')
+
+        for port_nr in range(ports):
+            try:
+                status_text = portstatus_elems[port_nr].text.strip()
+                modus_speed_text = portspeed_elems[port_nr].text.strip()
+                connection_speed_text = portconnectionspeed_elems[
+                    port_nr
+                ].text.strip()
+            except (IndexError, AttributeError):
+                status_text = self.port_status.get(port_nr + 1, {}).get(
+                    "status", None
+                )
+                modus_speed_text = self.port_status.get(port_nr + 1, {}).get(
+                    "modus_speed", None
+                )
+                connection_speed_text = self.port_status.get(port_nr + 1, {}).get(
+                    "connection_speed", None
+                )
+            status_by_port[port_nr + 1] = {
+                "status": status_text,
+                "modus_speed": modus_speed_text,
+                "connection_speed": connection_speed_text,
+            }
+
+        self.port_status = status_by_port
+        _LOGGER.debug("Port Status is %s", self.port_status)
+        return status_by_port
+
+    def parse_port_statistics(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[str, Any]:
+        """Parse port statistics from the html page."""
+
+        tree = html.fromstring(page.content)
+        port_elems = tree.xpath('//tr[@class="portID"]/td[1]')
+        rx_hidden1_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][1]')
+        rx_hidden2_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][2]')
+        tx_hidden1_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][3]')
+        tx_hidden2_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][4]')
+        crc_hidden1_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][5]')
+        crc_hidden2_elems = tree.xpath('//tr[@class="portID"]/input[@type="hidden"][6]')
+
+        int32_max = 2**32
+        rx = []
+        tx = []
+        crc = []
+
+        for i in range(ports):
+            port = int(port_elems[i].text)
+            bytes_received = int(rx_hidden1_elems[i].value) * int32_max + int(rx_hidden2_elems[i].value)
+            bytes_sent = int(tx_hidden1_elems[i].value) * int32_max + int(tx_hidden2_elems[i].value)
+            crc_error_packets = int(crc_hidden1_elems[i].value) * int32_max + int(crc_hidden2_elems[i].value)
+            
+            rx.append(bytes_received)
+            tx.append(bytes_sent)
+            crc.append(crc_error_packets)
+
+        io_zeros = [0] * ports
+        return {
+            "traffic_rx": rx,
+            "traffic_tx": tx,
+            "sum_rx": rx,
+            "sum_tx": tx,
+            "crc_errors": crc,
+            "speed_io": io_zeros,
+        }
 
 PARSERS = {
     "GS105E": GS105E,
@@ -834,4 +942,5 @@ PARSERS = {
     "GS316EP": GS316EP,
     "GS316EPP": GS316EPP,
     "JGS524Ev2": JGS524Ev2,
+    "GS105PE":GS105PE
 }
