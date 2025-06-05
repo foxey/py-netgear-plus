@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any
 
+import requests
 from lxml import html
 from requests import Response
 
@@ -348,6 +349,10 @@ class PageParser:
             return error_msg[0].value
         return None
 
+    def parse_reboot_success(self, page: Response | BaseResponse) -> bool:
+        """Parse if reboot was successful."""
+        return page.status_code == requests.codes.ok
+
 
 class GS105E(PageParser):
     """Parser for the GS105E switch."""
@@ -657,6 +662,13 @@ class GS308Ev4(GS108Ev4):
     def __init__(self) -> None:
         """Initialize the GS308Ev4 parser."""
         super().__init__()
+
+    def parse_reboot_success(self, page: Response | BaseResponse) -> bool:
+        """Parse if reboot was successful."""
+        return page.status_code in [
+            requests.codes.ok,
+            requests.codes.no_response,
+        ]
 
 
 class EMxSeries(PageParser):
