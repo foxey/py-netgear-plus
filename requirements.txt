@@ -2,5 +2,5 @@ colorlog==6.9.0
 ruff==0.11.12
 hatchling==1.27.0
 build==1.2.2.post1
-pytest==8.3.5
+pytest==8.4.0
 pytest-cov==6.1.1
