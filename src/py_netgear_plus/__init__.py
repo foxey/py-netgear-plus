@@ -336,6 +336,28 @@ class NetgearSwitchConnector:
         self._page_fetcher.clear_cookie()
         return response.status_code != status_code_not_found
 
+    def reboot(self) -> bool:
+        """Reboot the switch."""
+        if not self.switch_model.SWITCH_REBOOT_TEMPLATES:
+            return False
+
+        response = BaseResponse()
+        for template in self.switch_model.SWITCH_REBOOT_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = {}
+            if not self.get_offline_mode():
+                self._page_fetcher.set_data_from_template(template, self, data)
+            response = self.fetch_page(method, url, data)
+            if self._page_parser.parse_reboot_success(response):
+                return True
+
+        _LOGGER.debug(
+            "[NetgearSwitchConnector.reboot] failed to load any page of templates: %s",
+            self.switch_model.SWITCH_REBOOT_TEMPLATES,
+        )
+        return False
+
     def fetch_page(self, method: str, url: str, data: dict) -> Response | BaseResponse:
         """Fetch url and retry when first response is a redirect to the login page."""
         response = BaseResponse()

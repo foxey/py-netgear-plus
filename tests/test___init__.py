@@ -101,6 +101,10 @@ MODELS_FOR_GET_SWITCH_INFOS = [
     XS512EM,
 ]
 
+# List of models for reboot test, with
+# reboot response code and if page content is returned
+MODELS_FOR_REBOOT = [(GS108Ev3, 200, True), (GS308Ev4, 444, False)]
+
 TEST_MODELS = [model[0] for model in MODEL_PARAMETERS]
 
 
@@ -486,6 +490,93 @@ def test_turn_on_and_off_poe_port(switch_model: type[AutodetectedSwitchModel]) -
                     timeout=URL_REQUEST_TIMEOUT,
                     allow_redirects=False,
                 )
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "status_code", "has_content"),
+    MODELS_FOR_REBOOT,
+)
+def test_reboot(
+    switch_model: type[AutodetectedSwitchModel],
+    status_code: int,
+    has_content: bool,  # noqa: FBT001
+) -> None:
+    """Test switch reboot."""
+    if not switch_model.SWITCH_REBOOT_TEMPLATES:
+        pytest.skip(f"Model {switch_model.MODEL_NAME} does not support reboot.")
+
+    assert switch_model.SWITCH_REBOOT_TEMPLATES
+
+    with (
+        patch(
+            "py_netgear_plus.NetgearSwitchConnector.fetch_page_from_templates"
+        ) as mock_fetch_page_from_templates,
+    ):
+        page_fetcher = PyTestPageFetcher(switch_model)
+        mock_fetch_page_from_templates.side_effect = page_fetcher.from_file
+
+        connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+
+        with patch("py_netgear_plus.fetcher.requests.request") as mock_request:
+            mock_response = Mock()
+            with page_fetcher.get_path(
+                switch_model.AUTODETECT_TEMPLATES
+            ).open() as file:
+                mock_response.content = file.read()
+            mock_response.status_code = requests.codes.ok
+            mock_request.return_value = mock_response
+            connector.autodetect_model()
+        assert isinstance(connector.switch_model, switch_model)
+
+        connector._client_hash = "client_hash"
+        connector._gambit = "gambit"
+        connector.set_cookie("cookie_name", "cookie_value")
+
+        response = Mock()
+        response.status_code = status_code
+
+        # some switches don't return any content on a reboot, thus
+        # we need to have the ability to not load a page
+        if has_content:
+            with page_fetcher.get_path(
+                switch_model.SWITCH_REBOOT_TEMPLATES
+            ).open() as file:
+                response.content = file.read()
+        else:
+            response.content = None
+
+        with patch(
+            "py_netgear_plus.fetcher.requests.request",
+            return_value=response,
+        ) as mock_request:
+            cookies = requests.cookies.RequestsCookieJar()
+            cookies.set(
+                str(connector.get_cookie()[0]),
+                str(connector.get_cookie()[1]),
+                domain=connector.host,
+                path="/",
+            )
+
+            mock_request.return_value = response
+
+            data = {}
+            connector._page_fetcher.set_data_from_template(
+                connector.switch_model.SWITCH_REBOOT_TEMPLATES[0], connector, data
+            )
+
+            assert connector.reboot() is True
+
+            mock_request.assert_called()
+            mock_request.assert_called_with(
+                connector.switch_model.SWITCH_REBOOT_TEMPLATES[0]["method"],
+                connector.switch_model.SWITCH_REBOOT_TEMPLATES[0]["url"].format(
+                    ip=connector.host
+                ),
+                data=data,
+                cookies=cookies,
+                timeout=URL_REQUEST_TIMEOUT,
+                allow_redirects=False,
+            )
 
 
 if __name__ == "__main__":
