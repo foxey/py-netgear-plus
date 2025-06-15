@@ -122,6 +122,7 @@ def main() -> None:
         "login": login_command,
         "logout": logout_command,
         "parse": parse_command,
+        "reboot": reboot_command,
         "save": save_command,
         "status": status_command,
         "version": version_command,
@@ -195,6 +196,7 @@ def parse_commandline() -> argparse.ArgumentParser:
     subparsers.add_parser("collect", help="Collect a full set of data for testing")
     subparsers.add_parser("logout", help="Logout from the switch and delete the cookie")
     subparsers.add_parser("parse", help="Parse pages and save data to file")
+    subparsers.add_parser("reboot", help="Reboot the switch")
     subparsers.add_parser("save", help="Save pages to file")
     subparsers.add_parser("status", help="Display switch status")
     subparsers.add_parser("version", help="Display CLI version")
@@ -274,9 +276,10 @@ def collect_command(
 
 def identify_command(
     connector: NetgearSwitchConnector,
-    args: argparse.Namespace,  # noqa: ARG001
+    args: argparse.Namespace,
 ) -> bool:
     """Identify the switch model and print the model name."""
+    del args
     try:
         model = connector.autodetect_model()
     except SwitchModelNotDetectedError:
@@ -361,6 +364,26 @@ def parse_command(connector: NetgearSwitchConnector, args: argparse.Namespace) -
     switch_infos["switch_ip"] = "192.168.0.1"
     save_switch_infos(args.path, switch_infos)
     return True
+
+
+def reboot_command(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Save pages to file."""
+    if args.verbose:
+        print("Rebooting switch...", file=stderr)  # noqa: T201
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    connector.autodetect_model()
+    connector._get_switch_metadata()  # noqa: SLF001
+    if connector.reboot():
+        if Path.exists(COOKIE_FILE):
+            if args.verbose:
+                print("Reboot successful. Deleting cookie file...", file=stderr)  # noqa: T201
+            Path(COOKIE_FILE).unlink()
+        return True
+    if args.verbose:
+        print("Reboot failed.", file=stderr)  # noqa: T201
+    return False
 
 
 def version_command() -> bool:

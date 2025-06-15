@@ -942,6 +942,13 @@ class GS30xSeries(PageParser):
             return error_msg[0].text
         return None
 
+    def parse_reboot_success(self, page: Response | BaseResponse) -> bool:
+        """Parse if reboot was successful."""
+        return page.status_code in [
+            requests.codes.ok,
+            requests.codes.no_response,
+        ]
+
 
 class GS305EP(GS30xSeries):
     """Parser for the GS305EP switch."""

@@ -103,7 +103,12 @@ MODELS_FOR_GET_SWITCH_INFOS = [
 
 # List of models for reboot test, with
 # reboot response code and if page content is returned
-MODELS_FOR_REBOOT = [(GS108Ev3, 200, True), (GS308Ev4, 444, False)]
+MODELS_FOR_REBOOT = [
+    (GS108Ev3, 200, True),
+    (GS308Ev4, 444, False),
+    (GS308EP, 444, False),
+    (GS308EPP, 444, False),
+]
 
 TEST_MODELS = [model[0] for model in MODEL_PARAMETERS]
 

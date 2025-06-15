@@ -26,7 +26,7 @@ from .models import (
 )
 from .parsers import NetgearPlusPageParserError, create_page_parser
 
-__version__ = "0.4.6"
+__version__ = "0.4.7"
 
 DEFAULT_PAGE = "index.htm"
 MAX_AUTHENTICATION_FAILURES = 3
@@ -338,7 +338,8 @@ class NetgearSwitchConnector:
 
     def reboot(self) -> bool:
         """Reboot the switch."""
-        if not self.switch_model.SWITCH_REBOOT_TEMPLATES:
+        if not self.switch_model.has_reboot_button():
+            _LOGGER.info("[NetgearSwitchConnector.reboot] Reboot button not available.")
             return False
 
         response = BaseResponse()
