@@ -12,3 +12,4 @@ src/secrets.py
 coverage.xml
 .ruff_cache
 .pypirc
+.idea/
