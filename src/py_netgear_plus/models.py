@@ -125,6 +125,7 @@ class GS105E(AutodetectedSwitchModel):
         ("parse_login_title_tag", ["GS105E"]),
     ]
 
+
 class GS105Ev2(AutodetectedSwitchModel):
     """Definition for Netgear GS105Ev2 model."""
 

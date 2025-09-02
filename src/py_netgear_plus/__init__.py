@@ -34,6 +34,7 @@ MAX_AUTHENTICATION_FAILURES = 3
 PORT_STATUS_CONNECTED = ["Aktiv", "Up", "UP", "CONNECTED"]
 PORT_MODUS_SPEED = ["Auto"]
 SWITCH_STATES = ["on", "off"]
+FLOW_CONTROL = ["Enable", "Disable"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -706,6 +707,10 @@ class NetgearSwitchConnector:
                     )
                 else:
                     switch_data[f"port_{port_number}_connection_speed"] = 0
+                if port_status[port_number].get("description"):
+                    switch_data[f"port_{port_number}_description"] = port_status[port_number].get("description")
+                if port_status[port_number].get("flow_control"):
+                    switch_data[f"port_{port_number}_flow_control"] = port_status[port_number].get("flow_control")
             else:
                 message = (
                     f"Number of statusses ({len(port_status)})"
@@ -831,6 +836,11 @@ class NetgearSwitchConnector:
         return False
 
     def switch_port(self, port: int, state: str) -> bool:
+        current_info = self.get_switch_infos()
+        desc = current_info.get(f"port_{port}_description", "")
+        flow_raw = current_info.get(f"port_{port}_flow_control", "")
+        flow = 1 if str(flow_raw).lower() in ("enable", "enabled", "1", "true") else 2
+
         """Enable or disable a regular port."""
         if state not in SWITCH_STATES:
             message = f'State "{state}" not in {SWITCH_STATES}.'
@@ -843,6 +853,8 @@ class NetgearSwitchConnector:
             url = template["url"].format(ip=self.host)
             method = template["method"]
             data = self.switch_model.get_switch_port_data(port, state)
+            data["DESCRIPTION"] = desc
+            data["FLOW_CONTROL"] = flow
             self._page_fetcher.set_data_from_template(template, self, data)
             _LOGGER.debug("switch_port data=%s", data)
             response = BaseResponse
