@@ -3,4 +3,4 @@ ruff==0.12.12
 hatchling==1.27.0
 build==1.2.2.post1
 pytest==8.4.0
-pytest-cov==6.3.0
+pytest-cov==7.0.0
