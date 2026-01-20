@@ -718,4 +718,136 @@ class GS116Ev2(JGSxxxSeries):
     ]
 
 
+class MS108EUP(AutodetectedSwitchModel):
+    """Definition for Netgear MS108EUP model (Multi-Gig 8-Port PoE++ Ultra60)."""
+
+    MODEL_NAME = "MS108EUP"
+    PORTS = 8
+    POE_PORTS: ClassVar = [1, 2, 3, 4, 5, 6, 7, 8]
+    POE_MAX_POWER_ALL_PORTS = 230  # 230W total PoE budget
+    POE_MAX_POWER_SINGLE_PORT = 60  # Ultra60 PoE++
+
+    AUTODETECT_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/wmi/login"},
+    ]
+
+    CHECKS_AND_RESULTS: ClassVar = [
+        ("check_login_form_rand", [True]),
+        ("parse_login_title_tag", ["MS108EUP"]),
+    ]
+
+    LOGIN_TEMPLATE: ClassVar = {
+        "method": "post",
+        "url": "http://{ip}/homepage.html",
+        "params": {"LoginPassword": "_password_hash"},
+    }
+    ALLOWED_COOKIE_TYPES: ClassVar = ["gambitCookie"]
+
+    SWITCH_INFO_TEMPLATES: ClassVar = [
+        {
+            "method": "get",
+            "url": "http://{ip}/iss/specific/dashboard.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+
+    SWITCH_LED_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/iss/specific/leds.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+
+    PORT_STATUS_TEMPLATES: ClassVar = [
+        {
+            "method": "get",
+            "url": "http://{ip}/iss/specific/dashboard.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+
+    PORT_STATISTICS_TEMPLATES: ClassVar = [
+        {
+            "method": "get",
+            "url": "http://{ip}/iss/specific/interface_stats.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+
+    POE_PORT_CONFIG_TEMPLATES: ClassVar = [
+        {
+            "method": "get",
+            "url": "http://{ip}/iss/specific/poePortConf.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+
+    SWITCH_POE_PORT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/iss/specific/poePortConf.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+
+    CYCLE_POE_PORT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/iss/specific/poePortConf.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+
+    POE_PORT_STATUS_TEMPLATES: ClassVar = [
+        {
+            "method": "get",
+            "url": "http://{ip}/iss/specific/poePortStatus.html",
+            "params": {"Gambit": "_gambit", "GetData": "literal:TRUE"},
+        }
+    ]
+
+    LOGOUT_TEMPLATES: ClassVar = [
+        {
+            "method": "get",
+            "url": "http://{ip}/iss/specific/logout.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+
+    SWITCH_REBOOT_TEMPLATES: ClassVar = []
+
+    def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
+        """Fill dict with form fields for switching a PoE port."""
+        return {
+            "TYPE": "submitPoe",
+            "PORT_NO": poe_port,
+            "POWER_LIMIT_VALUE": 600,  # 60W max for Ultra60
+            "PRIORITY": "NOTSET",
+            "POWER_MODE": "NOTSET",
+            "POWER_LIMIT_TYPE": "NOTSET",
+            "DETECTION": "NOTSET",
+            "ADMIN_STATE": 1 if state == "on" else 0,
+            "DISCONNECT_TYPE": "NOTSET",
+        }
+
+    def get_power_cycle_poe_port_data(self, poe_port: int) -> dict:
+        """Return form fields for PoE port cycle."""
+        if poe_port not in self.POE_PORTS:
+            message = f"Port number {poe_port} out of range."
+            raise PortNumberOutofRangeError(message)
+        poeport_string = ["0"] * len(self.POE_PORTS)
+        poeport_string[poe_port - 1] = "1"
+        return {
+            "TYPE": "resetPoe",
+            "PoePort": "".join(poeport_string),
+        }
+
+    def get_switch_led_data(self, state: str) -> dict:
+        """Return form fields for LED control."""
+        return {
+            "PORT_LED_STATUS": 1 if state == "on" else 0,
+        }
+
+
 MODELS = get_all_child_classes_list(AutodetectedSwitchModel, "MODEL_NAME")
