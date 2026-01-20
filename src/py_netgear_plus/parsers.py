@@ -1288,4 +1288,42 @@ class GS116Ev2(JGSxxxSeries):
         super().__init__()
 
 
+class MS108EUP(GS31xSeries):
+    """Parser for the MS108EUP switch (Multi-Gig 8-Port PoE++ Ultra60).
+
+    This switch uses a similar interface to the GS316 series with Gambit
+    authentication. The HTML structure follows the same patterns as GS31xSeries.
+
+    Note: The switch also has a unique port rate endpoint at
+    /iss/specific/getPortRate.html that returns real-time Mbps data in a
+    different format (comma-separated values per port, ports separated by #).
+    This is not currently implemented but could be added for enhanced
+    traffic monitoring.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the MS108EUP parser."""
+        super().__init__()
+
+    def parse_led_status(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse status of the front panel LEDs from the html page.
+
+        MS108EUP uses 'portLedStatus' checkbox instead of 'ledStatus'.
+        The checkbox has 'checked' attribute when LEDs are on.
+        """
+        tree = html.fromstring(page.content)
+        # MS108EUP uses portLedStatus checkbox - checked means LEDs are on
+        xpath = tree.xpath('//input[@id="portLedStatus"]')
+        if xpath:
+            # Check if the checkbox has 'checked' attribute
+            led_on = xpath[0].get("checked") is not None
+            return {"led_status": "on" if led_on else "off"}
+        # Fallback: try the GS316 style
+        xpath = tree.xpath('//input[@id="ledStatus"]')
+        if xpath:
+            led_status = xpath[0].get("checked") is not None
+            return {"led_status": "on" if led_status else "off"}
+        return {"led_status": "unknown"}
+
+
 PARSERS = get_all_child_classes_dict(PageParser)
