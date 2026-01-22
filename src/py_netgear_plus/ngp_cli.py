@@ -18,6 +18,8 @@ Commands:
     parse             Parse collected pages and save data to a file.
     save              Save pages retrieved from the switch to a file.
     version           Display the CLI version.
+    vlan              Manage VLAN configuration (sub: status/mode/add/edit/
+                        remove/pvid/apply).
 
 Options:
     --password, -P    Specify the password for the switch. If not provided,
@@ -126,6 +128,7 @@ def main() -> None:
         "save": save_command,
         "status": status_command,
         "version": version_command,
+        "vlan": vlan_command,
     }
 
     if args.command in command_functions:
@@ -200,6 +203,48 @@ def parse_commandline() -> argparse.ArgumentParser:
     subparsers.add_parser("save", help="Save pages to file")
     subparsers.add_parser("status", help="Display switch status")
     subparsers.add_parser("version", help="Display CLI version")
+
+    vlan_parser = subparsers.add_parser("vlan", help="VLAN management")
+    vlan_sub = vlan_parser.add_subparsers(dest="vlan_action")
+
+    vlan_sub.add_parser("status", help="Show VLAN status")
+
+    vlan_mode_parser = vlan_sub.add_parser("mode", help="Set VLAN mode")
+    vlan_mode_parser.add_argument(
+        "mode",
+        choices=["noVlan", "bscPotBsd", "advPotBsd", "bsc8021Q", "adv8021Q"],
+    )
+
+    for verb in ("add", "edit"):
+        sp = vlan_sub.add_parser(verb, help=f"{verb.capitalize()} a VLAN")
+        sp.add_argument("vlan_id", type=int)
+        sp.add_argument("name")
+        sp.add_argument(
+            "ports",
+            help=(
+                "Port membership string, e.g. 'TUUUUUUE' "
+                "(T=Tagged, U=Untagged, E=Excluded)"
+            ),
+        )
+        sp.add_argument("--voice", action="store_true", help="Mark as voice VLAN")
+        sp.add_argument("--voice-cos", type=int, default=6)
+
+    vlan_remove_parser = vlan_sub.add_parser("remove", help="Delete a VLAN")
+    vlan_remove_parser.add_argument("vlan_id", type=int)
+
+    vlan_pvid_parser = vlan_sub.add_parser("pvid", help="Set port PVID")
+    vlan_pvid_parser.add_argument("port", type=int)
+    vlan_pvid_parser.add_argument("vlan_id", type=int)
+
+    vlan_apply_parser = vlan_sub.add_parser(
+        "apply", help="Apply a VLAN config from a JSON file"
+    )
+    vlan_apply_parser.add_argument("file")
+    vlan_apply_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Remove VLANs not listed in the config (except VLAN 1)",
+    )
 
     return parser
 
@@ -390,6 +435,107 @@ def version_command() -> bool:
     """Display CLI version."""
     print(f"Netgear Plus CLI version: {ngp_version}")  # noqa: T201
     return True
+
+
+def _vlan_prepare(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Load cookie + autodetect + fetch metadata for VLAN actions."""
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_vlan_support():
+        print(  # noqa: T201
+            f"VLAN management not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    if args.vlan_action != "status":
+        connector._get_switch_metadata()  # noqa: SLF001
+    return True
+
+
+def vlan_command(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Dispatch VLAN subcommands."""
+    if not args.vlan_action:
+        print("vlan: missing subcommand", file=stderr)  # noqa: T201
+        return False
+
+    if not _vlan_prepare(connector, args):
+        return False
+
+    try:
+        return _vlan_dispatch(connector, args)
+    except NotImplementedError as exc:
+        model = getattr(connector.switch_model, "MODEL_NAME", "<unknown>")
+        print(f"VLAN not supported on {model}: {exc}", file=stderr)  # noqa: T201
+        return False
+
+
+def _vlan_dispatch(  # noqa: PLR0911, PLR0912
+    connector: NetgearSwitchConnector, args: argparse.Namespace
+) -> bool:
+    """Run the VLAN subcommand chosen via args.vlan_action."""
+    action = args.vlan_action
+    if action == "status":
+        status = connector.vlan_status()
+        if args.json:
+            print(json.dumps(status, indent=4, default=str))  # noqa: T201
+        else:
+            print(f"Mode: {status['mode']}")  # noqa: T201
+            print("VLANs:")  # noqa: T201
+            for vid, v in status.get("vlans", {}).items():
+                print(f"  {vid}: {v.get('name')} members={v.get('members')}")  # noqa: T201
+            print("Ports:")  # noqa: T201
+            for p, info in status.get("ports", {}).items():
+                pretty_vlans = {
+                    vid: m.name.capitalize() for vid, m in info.get("vlans", {}).items()
+                }
+                print(  # noqa: T201
+                    f"  {p}: pvid={info.get('pvid')} vlans={pretty_vlans}"
+                )
+        return True
+
+    if action == "mode":
+        return connector.set_vlan_mode(args.mode)
+
+    if action == "add":
+        return connector.add_vlan(
+            args.vlan_id, args.name, args.ports, args.voice, args.voice_cos
+        )
+
+    if action == "edit":
+        return connector.edit_vlan(
+            args.vlan_id, args.name, args.ports, args.voice, args.voice_cos
+        )
+
+    if action == "remove":
+        return connector.remove_vlan(args.vlan_id)
+
+    if action == "pvid":
+        return connector.set_vlan_pvid(args.port, args.vlan_id)
+
+    if action == "apply":
+        path = Path(args.file)
+        if not path.exists():
+            print(f"File not found: {args.file}", file=stderr)  # noqa: T201
+            return False
+        with path.open() as f:
+            cfg = json.load(f)
+        # JSON keys are strings; coerce VLAN/port keys to int.
+        if "vlans" in cfg:
+            cfg["vlans"] = {int(k): v for k, v in cfg["vlans"].items()}
+        if "pvids" in cfg:
+            cfg["pvids"] = {int(k): int(v) for k, v in cfg["pvids"].items()}
+        summary = connector.apply_vlan_config(cfg, strict=args.strict)
+        print(json.dumps(summary, indent=4, default=str))  # noqa: T201
+        return True
+
+    print(f"Unknown vlan action: {action}", file=stderr)  # noqa: T201
+    return False
 
 
 if __name__ == "__main__":

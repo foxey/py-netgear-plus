@@ -25,6 +25,7 @@ from .models import (
     MultipleModelsDetectedError,
     PortNumberOutofRangeError,
     SwitchModelNotDetectedError,
+    VLANMember,
 )
 from .parsers import NetgearPlusPageParserError, create_page_parser
 
@@ -97,6 +98,36 @@ class InvalidSwitchStateError(Exception):
 
 class InvalidPoEPortError(Exception):
     """Port is not a PoE port."""
+
+
+class PortNotVLANMemberError(Exception):
+    """Port is not a member of a VLAN."""
+
+
+def _normalize_ports(ports_config: str | list) -> str:
+    """Coerce a list-of-strings ports_config to its single-char form."""
+    if isinstance(ports_config, list):
+        return "".join(x[0] for x in ports_config)
+    return ports_config
+
+
+def _cfg_to_ports_string(cfg: dict[int, "VLANMember"]) -> str:
+    """Render a port→VLANMember mapping as a 'TUUUUUUE' string."""
+    return "".join(cfg[port] for port in sorted(cfg))
+
+
+def _record(
+    summary: dict[str, list],
+    ok: bool,  # noqa: FBT001
+    bucket: str,
+    item: Any,
+    op: str,
+) -> None:
+    """Append item to bucket on success or to the 'failed' bucket otherwise."""
+    if ok:
+        summary[bucket].append(item)
+    else:
+        summary["failed"].append((op, item))
 
 
 class NetgearSwitchConnector:
@@ -538,6 +569,299 @@ class NetgearSwitchConnector:
             self.switch_model.SWITCH_REBOOT_TEMPLATES,
         )
         return False
+
+    def vlan_status(self) -> dict:
+        """Get informations about current vlan mode, and its configuration."""
+        if not self.switch_model.VLAN_STATUS_TEMPLATES:
+            message = "VLAN status cannot be queried on this model"
+            raise NotImplementedError(message)
+        response = self.fetch_page_from_templates(
+            self.switch_model.VLAN_STATUS_TEMPLATES
+        )
+        return self._page_parser.parse_vlan_status(response)
+
+    def set_vlan_mode(self, mode: str) -> bool:
+        """Set vlan mode."""
+        if not self.switch_model.VLAN_MODE_SET_TEMPLATES:
+            message = "VLAN mode cannot be changed on this model"
+            raise NotImplementedError(message)
+
+        for template in self.switch_model.VLAN_MODE_SET_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_vlan_mode_data(mode)  # type: ignore[report-call-issue]
+            _LOGGER.debug("vlan_mode data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            if self._page_fetcher.has_ok_status(response):
+                # Clear cached metadata to refetch on next poll
+                self._loaded_switch_metadata = {}
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_vlan_mode response was %s",
+                content,
+            )
+        return False
+
+    def add_vlan(
+        self,
+        vlan_id: int,
+        vlan_name: str | None = None,
+        ports_config: str | list | None = None,
+        voice_vlan: bool = False,  # noqa: FBT001, FBT002
+        voice_cos: int = 6,
+    ) -> bool:
+        """Add a new VLAN."""
+        return self._set_advanced_vlan_parameter(
+            "Add", vlan_id, vlan_name, ports_config, voice_vlan, voice_cos
+        )
+
+    def edit_vlan(
+        self,
+        vlan_id: int,
+        vlan_name: str | None = None,
+        ports_config: str | list | None = None,
+        voice_vlan: bool = False,  # noqa: FBT001, FBT002
+        voice_cos: int = 6,
+    ) -> bool:
+        """Edit an existing VLAN."""
+        return self._set_advanced_vlan_parameter(
+            "Apply", vlan_id, vlan_name, ports_config, voice_vlan, voice_cos
+        )
+
+    def remove_vlan(self, vlan_id: int) -> bool:
+        """Remove a VLAN."""
+        return self._set_advanced_vlan_parameter("Delete", vlan_id)
+
+    def _set_advanced_vlan_parameter(  # noqa: PLR0913
+        self,
+        action: str,
+        vlan_id: int,
+        vlan_name: str | None = None,
+        ports_config: str | list | None = None,
+        voice_vlan: bool = False,  # noqa: FBT001, FBT002
+        voice_cos: int = 6,
+    ) -> bool:
+        """Change advanced vlan parameters."""
+        if not self.switch_model.VLAN_ADVANCED_SET_TEMPLATES:
+            message = "VLAN advanced parameters cannot be changed on this model"
+            raise NotImplementedError(message)
+
+        for template in self.switch_model.VLAN_ADVANCED_SET_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+
+            data = self.switch_model.get_advanced_vlan_data(
+                action, vlan_id, vlan_name, ports_config, voice_vlan, voice_cos
+            )  # type: ignore[report-call-issue]
+            _LOGGER.debug("advanced_vlan_parameter data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            # It doesn't look like there is any way to know that the action failed.
+            # For example, deleting a VLAN that do not exist return 200 with no
+            # error or warn in sight.
+            if self._page_fetcher.has_ok_status(response):
+                # Clear cached metadata to refetch on next poll
+                self._loaded_switch_metadata = {}
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_advanced_vlan_parameter response was %s",
+                content,
+            )
+        return False
+
+    def set_vlan_pvid(self, port_idx: int, vlan_id: int) -> bool:
+        """Set pvid for a vlan."""
+        if not self.switch_model.VLAN_PVID_SET_TEMPLATES:
+            message = "VLAN pvid parameters cannot be changed on this model"
+            raise NotImplementedError(message)
+
+        for template in self.switch_model.VLAN_PVID_SET_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+
+            data = self.switch_model.get_pvid_data(port_idx, vlan_id)  # type: ignore[report-call-issue]
+            _LOGGER.debug("vlan_pvid data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            if self._page_fetcher.has_ok_status(response):
+                # It does not seem there is anything to latch on except
+                # checking if the message size is to small to be an
+                # HTML answer.
+                content_min_size = 30
+                if len(response.content) < content_min_size:
+                    raw = response.content
+                    if isinstance(raw, bytes):
+                        raw = raw.decode(errors="replace")
+                    r = raw.split("@")
+                    min_parts = 3
+                    if len(r) >= min_parts:
+                        message = f"Port {r[1]} is not a member of VLAN {r[2][1:-1]}"
+                    else:
+                        message = f"Unexpected short response: {raw!r}"
+                    raise PortNotVLANMemberError(message)
+                # Clear cached metadata to refetch on next poll
+                self._loaded_switch_metadata = {}
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_vlan_pvid response was %s",
+                content,
+            )
+        return False
+
+    def _diff_desired_vlans(
+        self,
+        desired_vlans: dict,
+        current_vlans: dict,
+        summary: dict[str, list],
+    ) -> list[tuple]:
+        """Issue add_vlan calls and return list of pending edits."""
+        edits_pending: list[tuple] = []
+        for vlan_id, spec in desired_vlans.items():
+            name = spec.get("name")
+            ports_config = _normalize_ports(spec["ports_config"])
+            voice_vlan = bool(spec.get("voice_vlan", False))
+            voice_cos = int(spec.get("voice_cos", 6))
+
+            if vlan_id not in current_vlans:
+                ok = self.add_vlan(vlan_id, name, ports_config, voice_vlan, voice_cos)
+                _record(summary, ok, "added", vlan_id, "add")
+                continue
+
+            cur = current_vlans[vlan_id]
+            cur_ports = _cfg_to_ports_string(cur["cfg"])
+            if cur.get("name") != name or cur_ports != ports_config:
+                edits_pending.append(
+                    (vlan_id, name, ports_config, voice_vlan, voice_cos)
+                )
+            else:
+                summary["skipped"].append(vlan_id)
+        return edits_pending
+
+    def _apply_pvids(
+        self,
+        desired_pvids: dict,
+        current_ports: dict,
+        summary: dict[str, list],
+    ) -> None:
+        for port, vlan_id in desired_pvids.items():
+            current_pvid = current_ports.get(port, {}).get("pvid")
+            if current_pvid == vlan_id:
+                continue
+            ok = self.set_vlan_pvid(port, vlan_id)
+            _record(summary, ok, "pvids_set", (port, vlan_id), "pvid")
+
+    def _strict_remove(
+        self,
+        desired_vlans: dict,
+        current_vlans: dict,
+        summary: dict[str, list],
+    ) -> None:
+        for vlan_id in list(current_vlans):
+            if vlan_id in desired_vlans:
+                continue
+            if vlan_id == 1 and 1 not in desired_vlans:
+                summary["skipped"].append(vlan_id)
+                continue
+            ok = self.remove_vlan(vlan_id)
+            _record(summary, ok, "removed", vlan_id, "remove")
+
+    def apply_vlan_config(
+        self,
+        config: dict,
+        *,
+        strict: bool = False,
+    ) -> dict:
+        """
+        Reconcile switch VLAN state against a desired config.
+
+        Expected keys:
+            mode (str): required, e.g. "adv8021Q"
+            vlans (dict[int, dict]): id -> {name, ports_config,
+                voice_vlan?, voice_cos?}
+            pvids (dict[int, int]): port -> vlan_id
+
+        strict=True removes VLANs not listed (except VLAN 1 unless
+        the user lists it).
+
+        Operation order is add → pvid → edit → remove to avoid a
+        switch quirk that silently drops an edit excluding a port
+        whose PVID still points to that VLAN.
+        """
+        desired_mode = config.get("mode")
+        if not desired_mode:
+            message = "config['mode'] is required"
+            raise ValueError(message)
+
+        desired_vlans = config.get("vlans") or {}
+        desired_pvids = config.get("pvids") or {}
+
+        current = self.vlan_status()
+        if current.get("mode") != desired_mode:
+            if not self.set_vlan_mode(desired_mode):
+                message = f"Failed to set VLAN mode to {desired_mode!r}"
+                raise RuntimeError(message)
+            current = self.vlan_status()
+        current_vlans = current.get("vlans") or {}
+        current_ports = current.get("ports") or {}
+
+        summary: dict[str, list] = {
+            "added": [],
+            "edited": [],
+            "removed": [],
+            "pvids_set": [],
+            "skipped": [],
+            "failed": [],
+        }
+
+        edits_pending = self._diff_desired_vlans(desired_vlans, current_vlans, summary)
+        self._apply_pvids(desired_pvids, current_ports, summary)
+        for vlan_id, name, ports_config, voice_vlan, voice_cos in edits_pending:
+            ok = self.edit_vlan(vlan_id, name, ports_config, voice_vlan, voice_cos)
+            _record(summary, ok, "edited", vlan_id, "edit")
+        if strict:
+            self._strict_remove(desired_vlans, current_vlans, summary)
+
+        return summary
 
     def fetch_page(
         self,

@@ -1036,5 +1036,286 @@ def test_fetch_page_from_templates_timeout_backs_off(
     assert relogin_called["count"] == 0  # timeout path must not re-login
 
 
+def test_parse_vlan_status_gs308ep() -> None:
+    """Parse the captured GS308EP vlan.cgi page."""
+    from py_netgear_plus.parsers import GS30xSeries as GS30xParser  # noqa: PLC0415
+
+    page = Mock()
+    page.status_code = requests.codes.ok
+    page.content = Path("pages/GS308EP/0/vlan.cgi").read_bytes()
+    parser = GS30xParser()
+    result = parser.parse_vlan_status(page)
+    assert result["mode"] == "adv8021Q"
+    assert set(result["vlans"].keys()) >= {1, 100}
+    assert result["vlans"][100]["name"] == "Internal"
+    assert result["vlans"][100]["cfg"][1] == "E"
+    assert result["vlans"][100]["cfg"][2] == "T"
+    # Ports 3..8 should be Untagged members of VLAN 100 per captured state.
+    for port in range(3, 9):
+        assert result["vlans"][100]["cfg"][port] == "U"
+    assert set(result["ports"].keys()) == set(range(1, 9))
+
+
+def test_vlan_calls_raise_on_unsupported_model() -> None:
+    """Switches without VLAN templates must raise NotImplementedError."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    # Default switch_model is AutodetectedSwitchModel — all VLAN template
+    # class vars are empty.
+    with pytest.raises(NotImplementedError):
+        connector.vlan_status()
+    with pytest.raises(NotImplementedError):
+        connector.set_vlan_mode("adv8021Q")
+    with pytest.raises(NotImplementedError):
+        connector.add_vlan(100, "x", "U" * 8)
+    with pytest.raises(NotImplementedError):
+        connector.edit_vlan(1, "x", "U" * 8)
+    with pytest.raises(NotImplementedError):
+        connector.remove_vlan(1)
+    with pytest.raises(NotImplementedError):
+        connector.set_vlan_pvid(1, 1)
+
+
+def _make_connector_for_vlan(current: dict) -> NetgearSwitchConnector:
+    """
+    Build a connector with VLAN methods mocked.
+
+    `current` is what vlan_status() will return.
+    """
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector.vlan_status = Mock(return_value=current)  # type: ignore[method-assign]
+    connector.set_vlan_mode = Mock(return_value=True)  # type: ignore[method-assign]
+    connector.add_vlan = Mock(return_value=True)  # type: ignore[method-assign]
+    connector.edit_vlan = Mock(return_value=True)  # type: ignore[method-assign]
+    connector.remove_vlan = Mock(return_value=True)  # type: ignore[method-assign]
+    connector.set_vlan_pvid = Mock(return_value=True)  # type: ignore[method-assign]
+    return connector
+
+
+def _ports_cfg(letters: str) -> dict[int, str]:
+    """Convert 'TUUUUUUE' to {1: 'T', 2: 'U', ...}."""
+    return {i + 1: c for i, c in enumerate(letters)}
+
+
+def test_apply_vlan_config_noop() -> None:
+    """Identical config should trigger no mutating calls."""
+    current = {
+        "mode": "adv8021Q",
+        "vlans": {
+            1: {"name": "default", "members": [1], "cfg": _ports_cfg("UUUUUUUU")},
+        },
+        "ports": {p: {"name": f"p{p}", "pvid": 1, "vlans": {}} for p in range(1, 9)},
+    }
+    connector = _make_connector_for_vlan(current)
+    config = {
+        "mode": "adv8021Q",
+        "vlans": {1: {"name": "default", "ports_config": "UUUUUUUU"}},
+        "pvids": dict.fromkeys(range(1, 9), 1),
+    }
+    summary = connector.apply_vlan_config(config)
+    connector.set_vlan_mode.assert_not_called()
+    connector.add_vlan.assert_not_called()
+    connector.edit_vlan.assert_not_called()
+    connector.remove_vlan.assert_not_called()
+    connector.set_vlan_pvid.assert_not_called()
+    assert summary["added"] == []
+    assert summary["edited"] == []
+    assert summary["pvids_set"] == []
+
+
+def test_apply_vlan_config_add_and_pvid() -> None:
+    """Missing VLAN should be added, differing PVIDs set."""
+    current = {
+        "mode": "adv8021Q",
+        "vlans": {
+            1: {"name": "default", "members": [1], "cfg": _ports_cfg("UUUUUUUU")},
+        },
+        "ports": {p: {"name": f"p{p}", "pvid": 1, "vlans": {}} for p in range(1, 9)},
+    }
+    connector = _make_connector_for_vlan(current)
+    config = {
+        "mode": "adv8021Q",
+        "vlans": {
+            1: {"name": "default", "ports_config": "UUUUUUUU"},
+            100: {"name": "Internal", "ports_config": "TUUUUUUE"},
+        },
+        "pvids": {2: 100, 3: 100},
+    }
+    summary = connector.apply_vlan_config(config)
+    connector.add_vlan.assert_called_once_with(100, "Internal", "TUUUUUUE", False, 6)  # noqa: FBT003
+    assert connector.set_vlan_pvid.call_count == 2
+    assert summary["added"] == [100]
+    assert sorted(summary["pvids_set"]) == [(2, 100), (3, 100)]
+
+
+def test_apply_vlan_config_edit_when_ports_differ() -> None:
+    """VLAN with same id but different membership should be edited."""
+    current = {
+        "mode": "adv8021Q",
+        "vlans": {
+            100: {
+                "name": "Internal",
+                "members": [1],
+                "cfg": _ports_cfg("TUUUUUUE"),
+            },
+        },
+        "ports": {p: {"name": f"p{p}", "pvid": 1, "vlans": {}} for p in range(1, 9)},
+    }
+    connector = _make_connector_for_vlan(current)
+    config = {
+        "mode": "adv8021Q",
+        "vlans": {100: {"name": "Internal", "ports_config": "TUUUUUUU"}},
+    }
+    summary = connector.apply_vlan_config(config)
+    connector.edit_vlan.assert_called_once()
+    assert summary["edited"] == [100]
+
+
+def test_apply_vlan_config_strict_removes_and_keeps_vlan1() -> None:
+    """strict=True removes extras except VLAN 1 (unless listed)."""
+    current = {
+        "mode": "adv8021Q",
+        "vlans": {
+            1: {"name": "default", "members": [1], "cfg": _ports_cfg("UUUUUUUU")},
+            200: {"name": "Guest", "members": [2], "cfg": _ports_cfg("UUUUUUUU")},
+            300: {"name": "Other", "members": [3], "cfg": _ports_cfg("UUUUUUUU")},
+        },
+        "ports": {p: {"name": f"p{p}", "pvid": 1, "vlans": {}} for p in range(1, 9)},
+    }
+    connector = _make_connector_for_vlan(current)
+    config = {
+        "mode": "adv8021Q",
+        "vlans": {200: {"name": "Guest", "ports_config": "UUUUUUUU"}},
+    }
+    summary = connector.apply_vlan_config(config, strict=True)
+    connector.remove_vlan.assert_called_once_with(300)
+    assert summary["removed"] == [300]
+    assert 1 in summary["skipped"]
+
+
+def test_apply_vlan_config_tracks_failures() -> None:
+    """When a sub-call returns False, the operation lands in summary['failed']."""
+    current = {
+        "mode": "adv8021Q",
+        "vlans": {
+            1: {"name": "default", "members": [1], "cfg": _ports_cfg("UUUUUUUU")},
+        },
+        "ports": {p: {"name": f"p{p}", "pvid": 1, "vlans": {}} for p in range(1, 9)},
+    }
+    connector = _make_connector_for_vlan(current)
+    connector.add_vlan = Mock(return_value=False)  # type: ignore[method-assign]
+    config = {
+        "mode": "adv8021Q",
+        "vlans": {
+            1: {"name": "default", "ports_config": "UUUUUUUU"},
+            100: {"name": "Internal", "ports_config": "TUUUUUUE"},
+        },
+    }
+    summary = connector.apply_vlan_config(config)
+    assert summary["added"] == []
+    assert ("add", 100) in summary["failed"]
+
+
+def test_apply_vlan_config_order_pvid_before_edit() -> None:
+    """Edits must be issued after PVIDs to avoid the silent-200 quirk."""
+    current = {
+        "mode": "adv8021Q",
+        "vlans": {
+            1: {"name": "default", "members": [1], "cfg": _ports_cfg("UUUUUUUU")},
+            100: {"name": "Internal", "members": [2], "cfg": _ports_cfg("EUUUUUUU")},
+        },
+        "ports": {p: {"name": f"p{p}", "pvid": 1, "vlans": {}} for p in range(1, 9)},
+    }
+    connector = _make_connector_for_vlan(current)
+    call_order: list[str] = []
+    connector.edit_vlan = Mock(  # type: ignore[method-assign]
+        side_effect=lambda *_a, **_kw: call_order.append("edit") or True
+    )
+    connector.set_vlan_pvid = Mock(  # type: ignore[method-assign]
+        side_effect=lambda *_a, **_kw: call_order.append("pvid") or True
+    )
+    config = {
+        "mode": "adv8021Q",
+        "vlans": {
+            1: {"name": "default", "ports_config": "UEEEEEEE"},
+            100: {"name": "Internal", "ports_config": "EUUUUUUU"},
+        },
+        "pvids": {2: 100, 3: 100},
+    }
+    connector.apply_vlan_config(config)
+    # Every "pvid" must appear before any "edit".
+    assert "pvid" in call_order
+    assert "edit" in call_order
+    assert call_order.index("edit") > max(
+        i for i, op in enumerate(call_order) if op == "pvid"
+    )
+
+
+def test_apply_vlan_config_switches_mode() -> None:
+    """Mode mismatch should call set_vlan_mode and re-fetch status."""
+    states = [
+        {"mode": "noVlan", "vlans": {}, "ports": {}},
+        {
+            "mode": "adv8021Q",
+            "vlans": {
+                1: {
+                    "name": "default",
+                    "members": [1],
+                    "cfg": _ports_cfg("UUUUUUUU"),
+                },
+            },
+            "ports": {
+                p: {"name": f"p{p}", "pvid": 1, "vlans": {}} for p in range(1, 9)
+            },
+        },
+    ]
+    connector = _make_connector_for_vlan(states[0])
+    connector.vlan_status = Mock(side_effect=states)  # type: ignore[method-assign]
+    config = {
+        "mode": "adv8021Q",
+        "vlans": {1: {"name": "default", "ports_config": "UUUUUUUU"}},
+    }
+    connector.apply_vlan_config(config)
+    connector.set_vlan_mode.assert_called_once_with("adv8021Q")
+
+
+def test_vlan_member_enum_roundtrip() -> None:
+    """VLANMember value is the letter; web_code and from_web_code match."""
+    from py_netgear_plus.models import VLANMember  # noqa: PLC0415
+
+    assert VLANMember.TAGGED == "T"
+    assert VLANMember.UNTAGGED == "U"
+    assert VLANMember.EXCLUDED == "E"
+    assert VLANMember.TAGGED.name.capitalize() == "Tagged"
+    assert VLANMember.TAGGED.web_code == "1"
+    assert VLANMember.UNTAGGED.web_code == "2"
+    assert VLANMember.EXCLUDED.web_code == "3"
+    for code in ("1", "2", "3"):
+        assert VLANMember.from_web_code(code).web_code == code
+
+
+def test_set_vlan_pvid_decodes_short_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Short '@port@vlan@' response triggers PortNotVLANMemberError."""
+    from py_netgear_plus import PortNotVLANMemberError  # noqa: PLC0415
+
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector.switch_model = GS308EP()
+    connector._client_hash = "deadbeef"
+
+    fake_resp = Mock()
+    fake_resp.status_code = requests.codes.ok
+    fake_resp.content = b"@2@(100)"
+
+    monkeypatch.setattr(
+        connector._page_fetcher, "request", lambda *_a, **_kw: fake_resp
+    )
+    monkeypatch.setattr(
+        connector._page_fetcher,
+        "set_data_from_template",
+        lambda *_a, **_kw: None,
+    )
+    with pytest.raises(PortNotVLANMemberError):
+        connector.set_vlan_pvid(2, 100)
+
+
 if __name__ == "__main__":
     pytest.main()

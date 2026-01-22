@@ -10,6 +10,7 @@ from lxml import html
 from requests import Response
 
 from .fetcher import BaseResponse
+from .models import VLANMember
 from .utils import get_all_child_classes_dict
 
 _LOGGER = logging.getLogger(__name__)
@@ -353,6 +354,10 @@ class PageParser:
     def parse_reboot_success(self, page: Response | BaseResponse) -> bool:
         """Parse if reboot was successful."""
         return page.status_code == requests.codes.ok
+
+    def parse_vlan_status(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse VLAN status from the html page."""
+        raise NotImplementedError
 
 
 class GS105E(PageParser):
@@ -960,6 +965,67 @@ class GS30xSeries(PageParser):
             requests.codes.ok,
             requests.codes.no_response,
         ]
+
+    def parse_vlan_status(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse vlan page into a configuration dict."""
+        tree = html.fromstring(page.content)
+        modes = [
+            m.attrib
+            for m in tree.xpath('//div[contains(@class,"vlan-left-view")]//button')
+        ]
+        mode_idx = int(tree.xpath('//input[contains(@id,"vlanMod")]')[0].value)
+        sel_mode = next(m["name"] for m in modes if int(m["mod-num"]) == mode_idx)
+        vlans = {}
+        ports = {}
+
+        if sel_mode == "adv8021Q":
+            # Doesn't seem like there is a better xpath than relying
+            # on index for GS308EP
+            desc = tree.xpath(
+                '(//div[contains(@class, "vlan-right-view")]'
+                '//ul[contains(@class, "tab-init")])[1]//li'
+            )
+            for d in desc:
+                r = d.xpath(".//span")
+                vlans[int(r[0].text_content())] = {
+                    "name": r[1].text,
+                    "members": [int(x) for x in r[2].text.strip().split(" ")],
+                    "cfg": {
+                        i: VLANMember.from_web_code(x)
+                        for i, x in enumerate(
+                            d.xpath(".//input[@hidden-mem]")[0].value, 1
+                        )
+                    },
+                }
+            for itm in tree.xpath('//ul[contains(@class, "pvid-tab")]//li'):
+                port = int(itm.xpath('.//span[contains(@class, "pot-num")]')[0].text)
+                ports[port] = {
+                    "name": itm.xpath('.//div[contains(@class, "pot-nam")]/span')[
+                        0
+                    ].text,
+                    "pvid": int(
+                        next(
+                            x[:-1]
+                            for x in itm.xpath(".//span[@pvid-str]")[0]
+                            .text.strip()
+                            .split(",")
+                            if "*" in x
+                        )
+                    ),
+                    "vlans": {
+                        vkey: vval["cfg"][port]
+                        for vkey, vval in vlans.items()
+                        if vval["cfg"][port] != VLANMember.EXCLUDED
+                    },
+                }
+        elif sel_mode != "noVlan":
+            _LOGGER.warning("Mode description for %s not implemented", sel_mode)
+
+        return {
+            "mode": sel_mode,
+            "vlans": vlans,
+            "ports": ports,
+        }
 
 
 class GS305EP(GS30xSeries):

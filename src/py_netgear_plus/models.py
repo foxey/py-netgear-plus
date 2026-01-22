@@ -1,8 +1,41 @@
 """Definitions of auto-detectable Switch models."""
 
+from contextlib import suppress
+from enum import Enum
 from typing import ClassVar
 
 from py_netgear_plus.utils import get_all_child_classes_list
+
+
+class VLANMember(str, Enum):
+    """
+    Port membership state in an 802.1Q VLAN.
+
+    The enum value is the single-character ports_config code (T/U/E).
+    Use ``.name.capitalize()`` for a display label ("Tagged"/...).
+    """
+
+    TAGGED = "T"
+    UNTAGGED = "U"
+    EXCLUDED = "E"
+
+    @property
+    def web_code(self) -> str:
+        """Code used in the switch HTML hidden-mem field."""
+        return _MEMBER_WEB_CODE[self]
+
+    @classmethod
+    def from_web_code(cls, code: str) -> "VLANMember":
+        """Build from switch HTML hidden-mem code (1/2/3)."""
+        return _WEB_CODE_TO_MEMBER[code]
+
+
+_MEMBER_WEB_CODE = {
+    VLANMember.TAGGED: "1",
+    VLANMember.UNTAGGED: "2",
+    VLANMember.EXCLUDED: "3",
+}
+_WEB_CODE_TO_MEMBER = {v: k for k, v in _MEMBER_WEB_CODE.items()}
 
 
 class MultipleModelsDetectedError(Exception):
@@ -19,6 +52,18 @@ class PortNumberOutofRangeError(Exception):
 
 class InvalidCryptFunctionError(Exception):
     """No implementation for the defined CRYPT_FUNCTION."""
+
+
+class UnknownVLANModeError(Exception):
+    """VLAN mode is not recognized."""
+
+
+class InvalidAdvancedVLANActionError(Exception):
+    """Action is not recognized or have incorrect parameters."""
+
+
+class InvalidVLANVoiceCoSError(Exception):
+    """Voice CoS is invalid."""
 
 
 class AutodetectedSwitchModel:
@@ -79,6 +124,10 @@ class AutodetectedSwitchModel:
     POE_PORT_STATUS_TEMPLATES: ClassVar = []
     LOGOUT_TEMPLATES: ClassVar = [{"method": "post", "url": "http://{ip}/logout.cgi"}]
     SWITCH_REBOOT_TEMPLATES: ClassVar = []
+    VLAN_STATUS_TEMPLATES: ClassVar = []
+    VLAN_MODE_SET_TEMPLATES: ClassVar = []
+    VLAN_ADVANCED_SET_TEMPLATES: ClassVar = []
+    VLAN_PVID_SET_TEMPLATES: ClassVar = []
 
     def __init__(self) -> None:
         """Empty contructor."""
@@ -111,9 +160,47 @@ class AutodetectedSwitchModel:
         del state
         return {}
 
+    def get_vlan_mode_data(self, mode: str) -> dict:
+        """Return empty dict. Implement on model level."""
+        del mode
+        return {}
+
+    def get_advanced_vlan_data(  # noqa: PLR0913
+        self,
+        action: str,
+        vlan_id: int,
+        vlan_name: str | None = None,
+        ports_config: str | list | None = None,
+        voice_vlan: bool = False,  # noqa: FBT001, FBT002
+        voice_cos: int = 6,
+    ) -> dict:
+        """Return empty dict. Implement on model level."""
+        del action
+        del vlan_id
+        del vlan_name
+        del ports_config
+        del voice_vlan
+        del voice_cos
+        return {}
+
+    def get_pvid_data(self, port_idx: int, vlan_id: int) -> dict:
+        """Return empty dict. Implement on model level."""
+        del port_idx
+        del vlan_id
+        return {}
+
     def has_reboot_button(self) -> bool:
         """Return true when switch reboot is supported."""
         return bool(self.SWITCH_REBOOT_TEMPLATES)
+
+    def has_vlan_support(self) -> bool:
+        """Return true when VLAN management is supported."""
+        return bool(
+            self.VLAN_STATUS_TEMPLATES
+            and self.VLAN_MODE_SET_TEMPLATES
+            and self.VLAN_ADVANCED_SET_TEMPLATES
+            and self.VLAN_PVID_SET_TEMPLATES
+        )
 
 
 class GS105E(AutodetectedSwitchModel):
@@ -440,6 +527,32 @@ class GS30xSeries(AutodetectedSwitchModel):
         }
     ]
 
+    VLAN_STATUS_TEMPLATES: ClassVar = [{"method": "get", "url": "http://{ip}/vlan.cgi"}]
+
+    VLAN_MODE_SET_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/vlanMod.cgi",
+            "params": {"hash": "_client_hash"},
+        }
+    ]
+
+    VLAN_ADVANCED_SET_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/8021qAdvanced.cgi",
+            "params": {"hash": "_client_hash"},
+        }
+    ]
+
+    VLAN_PVID_SET_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/portPVID.cgi",
+            "params": {"hash": "_client_hash"},
+        }
+    ]
+
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""
         return {
@@ -465,6 +578,89 @@ class GS30xSeries(AutodetectedSwitchModel):
         return {
             "portled": 0 if state == "on" else 2,
         }
+
+    def get_vlan_mode_data(self, mode: str) -> dict:
+        """Return empty dict. Implement on model level."""
+        available_modes = ["noVlan", "bscPotBsd", "advPotBsd", "bsc8021Q", "adv8021Q"]
+        try:
+            mode = available_modes.index(mode)
+        except ValueError as e:
+            message = f'Mode "{mode}" not in {available_modes}.'
+            raise UnknownVLANModeError(message) from e
+        return {"VLAN_MOD": str(mode)}
+
+    def get_advanced_vlan_data(  # noqa: PLR0913
+        self,
+        action: str,
+        vlan_id: int,
+        vlan_name: str | None = None,
+        ports_config: str | list | None = None,
+        voice_vlan: bool = False,  # noqa: FBT001, FBT002
+        voice_cos: int = 6,
+    ) -> dict:
+        """Return empty dict. Implement on model level."""
+        data = {"ACTION": action, "VLAN_ID": str(vlan_id)}
+        if action in ["Add", "Apply"]:
+            # There can only be one voice vlan, setting another one
+            # will change it to current one.
+            max_voice_cos = 7
+            if voice_cos < 0 or voice_cos > max_voice_cos:
+                message = f"CoS ({voice_cos}) is not in [0;7]."
+                raise InvalidVLANVoiceCoSError(message)
+
+            if not vlan_name:
+                message = "A VLAN name is required when adding or updating VLAN."
+                raise InvalidAdvancedVLANActionError(message)
+
+            if not ports_config:
+                message = "Port configuration is required when adding or updating VLAN."
+                raise InvalidAdvancedVLANActionError(message)
+
+            if isinstance(ports_config, list):
+                ports_config = "".join(x[0] for x in ports_config)
+
+            if isinstance(ports_config, str):
+                # Already-numeric form ("1"/"2"/"3") is also accepted;
+                # the isdigit() check below validates either way.
+                with suppress(ValueError):
+                    ports_config = "".join(VLANMember(c).web_code for c in ports_config)
+
+            if not ports_config.isdigit():
+                message = (
+                    "Invalid format for port config "
+                    "- there is leftover alpha characters."
+                )
+                raise InvalidAdvancedVLANActionError(message)
+
+            if len(ports_config) != self.PORTS:
+                message = (
+                    "Invalid port config - there should "
+                    f"be {self.PORTS} ports, received {len(ports_config)}."
+                )
+                raise InvalidAdvancedVLANActionError(message)
+
+            data.update(
+                {
+                    "vlanNum": str(99),  # It seems like it is only used by the UI
+                    "VLAN_NAME": vlan_name,
+                    "hiddenMem": ports_config,
+                    "voiceVLANID": str(int(voice_vlan)),
+                    "voiceVlanCos": str(voice_cos),
+                }
+            )
+            return data
+        if action == "Delete":
+            return data
+        message = f'Action "{action}" is not a known or implemented command.'
+        raise InvalidAdvancedVLANActionError(message)
+
+    def get_pvid_data(self, port_idx: int, vlan_id: int) -> dict:
+        """Return empty dict. Implement on model level."""
+        if port_idx > self.PORTS or port_idx < 1:
+            message = f"Invalid port, it should be between 1 and {self.PORTS}."
+            raise PortNumberOutofRangeError(message)
+
+        return {"PORT": str(port_idx), "PVID": str(vlan_id)}
 
 
 class GS30xEPxSeries(GS30xSeries):
@@ -628,6 +824,15 @@ class GS316Series(GS30xSeries):
             "params": {"Gambit": "_gambit", "ACTION": "literal:Reload"},
         }
     ]
+
+    # GS316* uses a different web UI (iss/specific/*.html) than the
+    # GS305/308 family, so the GS30xSeries VLAN endpoints + DOM
+    # assumptions do not apply. Disable until verified against the
+    # GS316 firmware.
+    VLAN_STATUS_TEMPLATES: ClassVar = []
+    VLAN_MODE_SET_TEMPLATES: ClassVar = []
+    VLAN_ADVANCED_SET_TEMPLATES: ClassVar = []
+    VLAN_PVID_SET_TEMPLATES: ClassVar = []
 
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""
