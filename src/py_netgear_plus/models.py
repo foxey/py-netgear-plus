@@ -592,8 +592,13 @@ class GS316Series(GS30xSeries):
             "params": {"Gambit": "_gambit"},
         }
     ]
-
-    SWITCH_REBOOT_TEMPLATES: ClassVar = []
+    SWITCH_REBOOT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/iss/specific/sys_reload.html",
+            "params": {"Gambit": "_gambit", "ACTION": "literal:Reload"},
+        }
+    ]
 
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""
@@ -648,6 +653,13 @@ class GS316EPP(GS316EP):
     CHECKS_AND_RESULTS: ClassVar = [
         ("check_login_form_rand", [True]),
         ("parse_login_title_tag", ["GS316EPP"]),
+    ]
+    SWITCH_REBOOT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/iss/specific/sys_reload.html",
+            "params": {"Gambit": "_gambit", "ACTION": "literal:Reload"},
+        }
     ]
 
 
