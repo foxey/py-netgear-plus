@@ -649,7 +649,7 @@ class GS316EPP(GS316EP):
     """Definition for Netgear GS316EPP model."""
 
     MODEL_NAME = "GS316EPP"
-    POE_POWER_ALL_PORTS = 231
+    POE_MAX_POWER_ALL_PORTS = 231
     CHECKS_AND_RESULTS: ClassVar = [
         ("check_login_form_rand", [True]),
         ("parse_login_title_tag", ["GS316EPP"]),
