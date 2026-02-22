@@ -30,6 +30,7 @@ from py_netgear_plus.models import (
     GS108PEv3,
     GS308Ev4,
     JGS524Ev2,
+    GSS108E
 )
 from py_netgear_plus.netgear_crypt import hex_hmac_md5, merge_hash
 
@@ -80,6 +81,12 @@ MODEL_PARAMETERS = [
         "6ca0965e7a44ee17eec5d575c8c56dd8",
         '<html><input name="Gambit" value="cookie_value"></html>',
     ),
+    (
+        GSS108E,
+        "614935428",
+        "503aa4f9209c02d6fea7c56d1577f445",
+        "<html></html>"
+    )
 ]
 # Add models without a full set of pages with pytest.param(GSXYZ,
 #   marks=pytest.mark.xfail(reason="no valid data pages"))
@@ -99,6 +106,7 @@ MODELS_FOR_GET_SWITCH_INFOS = [
     JGS516PE,
     JGS524Ev2,
     XS512EM,
+    GSS108E,
 ]
 
 # List of models for reboot test, with
