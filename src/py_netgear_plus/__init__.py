@@ -22,6 +22,7 @@ from .models import (
     MODELS,
     AutodetectedSwitchModel,
     MultipleModelsDetectedError,
+    PortNumberOutofRangeError,
     SwitchModelNotDetectedError,
 )
 from .parsers import NetgearPlusPageParserError, create_page_parser
@@ -33,6 +34,7 @@ MAX_AUTHENTICATION_FAILURES = 3
 PORT_STATUS_CONNECTED = ["Aktiv", "Up", "UP", "CONNECTED"]
 PORT_MODUS_SPEED = ["Auto"]
 SWITCH_STATES = ["on", "off"]
+FLOW_CONTROL = ["Enable", "Disable"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -705,6 +707,10 @@ class NetgearSwitchConnector:
                     )
                 else:
                     switch_data[f"port_{port_number}_connection_speed"] = 0
+                if port_status[port_number].get("description"):
+                    switch_data[f"port_{port_number}_description"] = port_status[port_number].get("description")
+                if port_status[port_number].get("flow_control"):
+                    switch_data[f"port_{port_number}_flow_control"] = port_status[port_number].get("flow_control")
             else:
                 message = (
                     f"Number of statusses ({len(port_status)})"
@@ -765,15 +771,16 @@ class NetgearSwitchConnector:
         if poe_port in self.poe_ports:
             for template in self.switch_model.SWITCH_POE_PORT_TEMPLATES:
                 url = template["url"].format(ip=self.host)
+                method = template["method"]
                 data = self.switch_model.get_switch_poe_port_data(poe_port, state)  # type: ignore[report-call-issue]
                 self._page_fetcher.set_data_from_template(template, self, data)
                 _LOGGER.debug("switch_poe_port data=%s", data)
                 response = BaseResponse
                 try:
-                    response = self._page_fetcher.request("post", url, data)
+                    response = self._page_fetcher.request(method, url, data)
                 except NotLoggedInError as error:
                     if self.get_login_cookie():
-                        response = self._page_fetcher.request("post", url, data)
+                        response = self._page_fetcher.request(method, url, data)
                     else:
                         message = "Not logged in and unable to login."
                         raise LoginFailedError(message) from error
@@ -827,6 +834,56 @@ class NetgearSwitchConnector:
                     response.content.strip(),
                 )
         return False
+
+    def switch_port(self, port: int, state: str) -> bool:
+        current_info = self.get_switch_infos()
+        desc = current_info.get(f"port_{port}_description", "")
+        flow_raw = current_info.get(f"port_{port}_flow_control", "")
+        flow = 1 if str(flow_raw).lower() in ("enable", "enabled", "1", "true") else 2
+
+        """Enable or disable a regular port."""
+        if state not in SWITCH_STATES:
+            message = f'State "{state}" not in {SWITCH_STATES}.'
+            raise InvalidSwitchStateError(message)
+        if port < 1 or port > self.ports:
+            message = f"Port {port} not in range 1-{self.ports}."
+            raise PortNumberOutofRangeError(message)
+
+        for template in self.switch_model.SWITCH_PORT_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_switch_port_data(port, state)
+            data["DESCRIPTION"] = desc
+            data["FLOW_CONTROL"] = flow
+            self._page_fetcher.set_data_from_template(template, self, data)
+            _LOGGER.debug("switch_port data=%s", data)
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+            if (
+                self._page_fetcher.has_ok_status(response)
+                and str(response.content.strip()) == "b'SUCCESS'"
+            ):
+                return True
+            _LOGGER.warning(
+                "NetgearSwitchConnector.switch_port response was %s",
+                response.content.strip(),
+            )
+        return False
+
+    def turn_on_port(self, port: int) -> bool:
+        """Enable a port (Auto)."""
+        return self.switch_port(port, "on")
+
+    def turn_off_port(self, port: int) -> bool:
+        """Disable a port."""
+        return self.switch_port(port, "off")
 
     def save_pages(self, path_prefix: str = "") -> None:
         """Save all pages to files for debugging."""

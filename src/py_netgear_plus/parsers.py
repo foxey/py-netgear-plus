@@ -405,15 +405,19 @@ class GS105Ev2(PageParser):
         portstatus_elems = tree.xpath('//tr[@class="portID"]/td[4]')
         portspeed_elems = tree.xpath('//tr[@class="portID"]/td[5]')
         portconnectionspeed_elems = tree.xpath('//tr[@class="portID"]/td[6]')
+        portflowcontrol_elems = tree.xpath('//tr[@class="portID"]/td[7]')
 
         for port_nr in range(ports):
             try:
+                description_text = (_port_elems[port_nr].text or '')
                 status_text = portstatus_elems[port_nr].text.strip()
                 modus_speed_text = portspeed_elems[port_nr].text.strip()
                 connection_speed_text = strip_duplex(
                     portconnectionspeed_elems[port_nr].text
                 )
+                flow_control_text = portflowcontrol_elems[port_nr].text.strip()
             except (IndexError, AttributeError):
+                description_text = self.port_status.get(port_nr + 1, {}).get("description", None)
                 status_text = self.port_status.get(port_nr + 1, {}).get("status", None)
                 modus_speed_text = self.port_status.get(port_nr + 1, {}).get(
                     "modus_speed", None
@@ -421,10 +425,13 @@ class GS105Ev2(PageParser):
                 connection_speed_text = self.port_status.get(port_nr + 1, {}).get(
                     "connection_speed", None
                 )
+                flow_control_text = self.port_status.get(port_nr + 1, {}).get("flow_control", None)
             status_by_port[port_nr + 1] = {
+                "description": description_text,
                 "status": status_text,
                 "modus_speed": modus_speed_text,
                 "connection_speed": connection_speed_text,
+                "flow_control": flow_control_text,
             }
 
         self.port_status = status_by_port
