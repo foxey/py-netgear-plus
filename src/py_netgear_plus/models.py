@@ -717,5 +717,28 @@ class GS116Ev2(JGSxxxSeries):
         ("parse_first_script_tag", ["GS116Ev2"]),
     ]
 
+class GSS108E(AutodetectedSwitchModel):
+    """Definition for Netgear GSS108E model."""
+
+    MODEL_NAME = "GSS108E"
+    PORTS = 8
+    POE_PORTS: ClassVar = []
+    ALLOWED_COOKIE_TYPES: ClassVar = ["SID"]
+
+    CHECKS_AND_RESULTS: ClassVar = [
+        ("check_login_form_rand", [True]),
+        ("parse_login_title_tag", ["GSS108E"]),
+    ]
+
+    # Mandatory request templates for interacting with the switch
+    LOGIN_TEMPLATE: ClassVar = {
+        "method": "post",
+        "url": "http://{ip}/login.cgi",
+        "params": {"password": "_password_hash"},
+    }
+
+    PORT_STATUS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/status.cgi"},
+    ]
 
 MODELS = get_all_child_classes_list(AutodetectedSwitchModel, "MODEL_NAME")
