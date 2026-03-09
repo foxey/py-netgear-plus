@@ -326,7 +326,19 @@ class PageFetcher:
         data_key = "data" if method == "post" else "params"
         if self._cookie_name and self._cookie_content:
             jar = requests.cookies.RequestsCookieJar()
-            jar.set(self._cookie_name, self._cookie_content, domain=self.host, path="/")
+            if ":" in self.host:
+                host_only, port_only = self.host.split(":")
+                jar.set(
+                    self._cookie_name,
+                    self._cookie_content,
+                    domain=host_only,
+                    path="/",
+                    port=port_only,
+                )
+            else:
+                jar.set(
+                    self._cookie_name, self._cookie_content, domain=self.host, path="/"
+                )
             kwargs = {
                 data_key: data,
                 "cookies": jar,
