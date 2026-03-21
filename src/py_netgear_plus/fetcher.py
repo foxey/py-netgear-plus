@@ -1,5 +1,6 @@
 """HTML page retrieval classes."""
 
+import json
 import logging
 from contextlib import suppress
 from pathlib import Path
@@ -75,6 +76,9 @@ class PageFetcher:
         self._cookie_name = None
         self._cookie_content = None
 
+        # bearer token (JSON REST API switches)
+        self._bearer_token = None
+
         # offline mode settings
         self.offline_mode = False
         self.offline_path_prefix = ""
@@ -148,6 +152,50 @@ class PageFetcher:
         """Clear cookie."""
         self._cookie_name = None
         self._cookie_content = None
+
+    def set_bearer_token(self, token: str) -> None:
+        """Set Bearer token for JSON REST API authentication."""
+        self._bearer_token = token
+
+    def has_bearer_token(self) -> bool:
+        """Return True if a Bearer token is set."""
+        return self._bearer_token is not None
+
+    def clear_bearer_token(self) -> None:
+        """Clear Bearer token."""
+        self._bearer_token = None
+
+    def json_request(
+        self,
+        method: str,
+        url: str,
+        data: Any = None,
+    ) -> Response | BaseResponse:
+        """Make a JSON REST API request with optional Bearer token auth."""
+        if self.offline_mode:
+            return self.get_page_from_file(url)
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+        }
+        if self._bearer_token:
+            headers["Authorization"] = f"Bearer {self._bearer_token}"
+        kwargs: dict[str, Any] = {
+            "headers": headers,
+            "timeout": URL_REQUEST_TIMEOUT,
+        }
+        if data is not None:
+            headers["Content-Type"] = "text/plain;charset=UTF-8"
+            kwargs["data"] = json.dumps(data, separators=(",", ":"))
+        try:
+            response = requests.request(method, url, **kwargs)  # noqa: S113
+        except requests.exceptions.Timeout:
+            return BaseResponse()
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.ChunkedEncodingError,
+        ) as error:
+            raise PageFetcherConnectionError from error
+        return response
 
     def get_page_from_file(self, url: str) -> BaseResponse:
         """Get page from file."""
@@ -239,7 +287,11 @@ class PageFetcher:
         """Check for redirect to login when not authenticated (anymore)."""
         if "content" in dir(response) and response.content:
             title = html.fromstring(response.content).xpath("//title")
-            if len(title) and title[0].text.lower() == "redirect to login":
+            if (
+                len(title)
+                and title[0].text
+                and title[0].text.lower() == "redirect to login"
+            ):
                 _LOGGER.info(
                     "[PageFetcher._is_authenticated] Returning false: title=%s",
                     title[0].text.lower(),
