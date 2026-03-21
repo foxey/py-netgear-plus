@@ -719,11 +719,9 @@ class GS116Ev2(JGSxxxSeries):
     ]
 
 
-class MS308E(AutodetectedSwitchModel):
-    """Definition for Netgear MS308E model."""
+class MS3xxSeries(AutodetectedSwitchModel):
+    """Parent class definition for Netgear MS3xx series (JSON REST API)."""
 
-    MODEL_NAME = "MS308E"
-    PORTS = 8
     API_TYPE: ClassVar = "json_rest"
     CHECKS_AND_RESULTS: ClassVar = []
     AUTODETECT_TEMPLATES: ClassVar = [
@@ -747,6 +745,20 @@ class MS308E(AutodetectedSwitchModel):
         {"method": "get", "url": "http://{ip}/api/ports/statistics"},
     ]
     LOGOUT_TEMPLATES: ClassVar = []
+
+
+class MS305E(MS3xxSeries):
+    """Definition for Netgear MS305E model."""
+
+    MODEL_NAME = "MS305E"
+    PORTS = 5
+
+
+class MS308E(MS3xxSeries):
+    """Definition for Netgear MS308E model."""
+
+    MODEL_NAME = "MS308E"
+    PORTS = 8
 
 
 MODELS = get_all_child_classes_list(AutodetectedSwitchModel, "MODEL_NAME")
