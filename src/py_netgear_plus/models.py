@@ -32,6 +32,7 @@ class AutodetectedSwitchModel:
     POE_MAX_POWER_ALL_PORTS = None
     POE_MAX_POWER_SINGLE_PORT = None
     POE_SCHEDULING = False
+    API_TYPE: ClassVar = ""
     CHECKS_AND_RESULTS: ClassVar = []
 
     AUTODETECT_TEMPLATES: ClassVar = [
@@ -716,6 +717,21 @@ class GS116Ev2(JGSxxxSeries):
         ("check_login_form_rand", [False]),
         ("parse_first_script_tag", ["GS116Ev2"]),
     ]
+
+
+class MS308E(AutodetectedSwitchModel):
+    """Definition for Netgear MS308E model."""
+
+    MODEL_NAME = "MS308E"
+    PORTS = 8
+    API_TYPE: ClassVar = "json_rest"
+    CHECKS_AND_RESULTS: ClassVar = []
+    AUTODETECT_TEMPLATES: ClassVar = []
+    LOGIN_TEMPLATE: ClassVar = {}
+    SWITCH_INFO_TEMPLATES: ClassVar = []
+    PORT_STATUS_TEMPLATES: ClassVar = []
+    PORT_STATISTICS_TEMPLATES: ClassVar = []
+    LOGOUT_TEMPLATES: ClassVar = []
 
 
 MODELS = get_all_child_classes_list(AutodetectedSwitchModel, "MODEL_NAME")
