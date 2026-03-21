@@ -157,18 +157,21 @@ class NetgearSwitchConnector:
         )
         return True
 
-    def _json_api_fetch(self, url: str) -> Response | BaseResponse:
+    def _json_api_fetch(self, templates: list) -> Response | BaseResponse:
         """Fetch a JSON REST API endpoint with retry on auth failure."""
-        response = self._page_fetcher.json_request("get", url)
-        if (
-            response.status_code == status_code_unauthorized
-            and self._json_api_login()
-        ):
-            response = self._page_fetcher.json_request("get", url)
-        if not self._page_fetcher.has_ok_status(response):
-            message = f"Failed to load JSON API endpoint: {url}"
-            raise PageNotLoadedError(message)
-        return response
+        for template in templates:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            response = self._page_fetcher.json_request(method, url)
+            if (
+                response.status_code == status_code_unauthorized
+                and self._json_api_login()
+            ):
+                response = self._page_fetcher.json_request(method, url)
+            if self._page_fetcher.has_ok_status(response):
+                return response
+        message = f"Failed to load any JSON API endpoint: {templates}"
+        raise PageNotLoadedError(message)
 
     def _autodetect_json_api(self) -> type[AutodetectedSwitchModel] | None:
         """Try to detect switch model via JSON REST API."""
@@ -178,33 +181,24 @@ class NetgearSwitchConnector:
         ]
         for mdl_cls in json_api_models:
             mdl = mdl_cls()
-            for template in mdl.AUTODETECT_TEMPLATES:
-                url = template["url"].format(ip=self.host)
-                method = template["method"]
-                with suppress(PageFetcherConnectionError):
-                    self._set_instance_attributes_by_model(mdl)
-                    response = self._page_fetcher.json_request(method, url)
-                    if (
-                        response.status_code == status_code_unauthorized
-                        and self._json_api_login()
-                    ):
-                        response = self._page_fetcher.json_request(
-                            method, url
+            # Temporarily set model so login templates are available
+            self._set_instance_attributes_by_model(mdl)
+            with suppress(PageFetcherConnectionError, PageNotLoadedError):
+                response = self._json_api_fetch(
+                    mdl.AUTODETECT_TEMPLATES
+                )
+                try:
+                    data = response.json()
+                    model_number = data.get("systemInfo", {}).get(
+                        "modelNumber", ""
+                    )
+                    if model_number == mdl.MODEL_NAME:
+                        self._page_parser = create_page_parser(
+                            self.switch_model.MODEL_NAME
                         )
-                    if not self._page_fetcher.has_ok_status(response):
-                        continue
-                    try:
-                        data = response.json()
-                        model_number = data.get("systemInfo", {}).get(
-                            "modelNumber", ""
-                        )
-                        if model_number == mdl.MODEL_NAME:
-                            self._page_parser = create_page_parser(
-                                self.switch_model.MODEL_NAME
-                            )
-                            return self.switch_model
-                    except (ValueError, KeyError):
-                        pass
+                        return self.switch_model
+                except (ValueError, KeyError):
+                    pass
         self.switch_model = AutodetectedSwitchModel
         return None
 
@@ -570,10 +564,9 @@ class NetgearSwitchConnector:
         if not self.switch_model:
             self.autodetect_model()
         if self._is_json_api:
-            url = self.switch_model.SWITCH_INFO_TEMPLATES[0]["url"].format(
-                ip=self.host
+            page = self._json_api_fetch(
+                self.switch_model.SWITCH_INFO_TEMPLATES
             )
-            page = self._json_api_fetch(url)
         else:
             page = self.fetch_page_from_templates(
                 self.switch_model.SWITCH_INFO_TEMPLATES
@@ -593,10 +586,9 @@ class NetgearSwitchConnector:
 
     def _get_port_statistics(self) -> dict[str, Any]:
         if self._is_json_api:
-            url = self.switch_model.PORT_STATISTICS_TEMPLATES[0]["url"].format(
-                ip=self.host
+            response = self._json_api_fetch(
+                self.switch_model.PORT_STATISTICS_TEMPLATES
             )
-            response = self._json_api_fetch(url)
         else:
             response = self.fetch_page_from_templates(
                 self.switch_model.PORT_STATISTICS_TEMPLATES
@@ -801,10 +793,9 @@ class NetgearSwitchConnector:
     def _get_port_status(self) -> dict:
         switch_data = {}
         if self._is_json_api:
-            url = self.switch_model.PORT_STATUS_TEMPLATES[0]["url"].format(
-                ip=self.host
+            response_portstatus = self._json_api_fetch(
+                self.switch_model.PORT_STATUS_TEMPLATES
             )
-            response_portstatus = self._json_api_fetch(url)
         else:
             response_portstatus = self.fetch_page_from_templates(
                 self.switch_model.PORT_STATUS_TEMPLATES
