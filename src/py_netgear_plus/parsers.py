@@ -1289,11 +1289,11 @@ class GS116Ev2(JGSxxxSeries):
         super().__init__()
 
 
-class MS308E(PageParser):
-    """Parser for the MS308E switch (JSON REST API)."""
+class MS3xxSeries(PageParser):
+    """Parser for MS3xx series switches (JSON REST API)."""
 
     def __init__(self) -> None:
-        """Initialize the MS308E parser."""
+        """Initialize the MS3xx series parser."""
         super().__init__()
 
     def parse_switch_metadata(self, page: Response | BaseResponse) -> dict[str, Any]:
@@ -1378,6 +1378,22 @@ class MS308E(PageParser):
     def has_api_v2(self) -> bool:
         """JSON REST API switches do not use the v2 HTML API."""
         return False
+
+
+class MS305E(MS3xxSeries):
+    """Parser for the MS305E switch."""
+
+    def __init__(self) -> None:
+        """Initialize the MS305E parser."""
+        super().__init__()
+
+
+class MS308E(MS3xxSeries):
+    """Parser for the MS308E switch."""
+
+    def __init__(self) -> None:
+        """Initialize the MS308E parser."""
+        super().__init__()
 
 
 PARSERS = get_all_child_classes_dict(PageParser)

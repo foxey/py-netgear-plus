@@ -22,6 +22,7 @@ from py_netgear_plus.models import (
     GS308EPP,
     GS316EPP,
     JGS516PE,
+    MS305E,
     MS308E,
     XS512EM,
     AutodetectedSwitchModel,
@@ -585,13 +586,12 @@ def test_reboot(
             )
 
 
-class MS308ETestHelper:
-    """Helper for MS308E JSON REST API tests."""
+class JsonApiTestHelper:
+    """Helper for JSON REST API switch tests (MS3xx series)."""
 
-    DATA_DIR = Path("pages/MS308E")
-
-    def __init__(self) -> None:
-        """Initialize the MS308E test helper."""
+    def __init__(self, model_name: str) -> None:
+        """Initialize the JSON API test helper."""
+        self.data_dir = Path(f"pages/{model_name}")
         self._sequence = 0
 
     def next_sequence(self) -> int:
@@ -612,40 +612,60 @@ class MS308ETestHelper:
     def mock_json_request(self, method: str, url: str, **kwargs: dict) -> Mock:  # noqa: ARG002
         """Mock json_request based on URL."""
         if "/api/system/status" in url:
-            return self.make_json_response(self.DATA_DIR / "system_status.json")
+            return self.make_json_response(self.data_dir / "system_status.json")
         if "/api/system/login" in url:
-            return self.make_json_response(self.DATA_DIR / "login.json")
+            return self.make_json_response(self.data_dir / "login.json")
         if "/api/login_session" in url:
-            return self.make_json_response(self.DATA_DIR / "login_session.json")
+            return self.make_json_response(self.data_dir / "login_session.json")
         if "/api/ports/statistics" in url:
             return self.make_json_response(
-                self.DATA_DIR / str(self._sequence) / "ports_statistics.json"
+                self.data_dir / str(self._sequence) / "ports_statistics.json"
             )
         if "/api/ports" in url:
             return self.make_json_response(
-                self.DATA_DIR / str(self._sequence) / "ports.json"
+                self.data_dir / str(self._sequence) / "ports.json"
             )
         resp = Mock()
         resp.status_code = requests.codes.not_found
         return resp
 
 
-def test_ms308e_autodetect_model() -> None:
-    """Test autodetect_model for MS308E via JSON REST API."""
-    helper = MS308ETestHelper()
+JSON_API_MODELS = [
+    (MS305E, 5),
+    (MS308E, 8),
+]
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_autodetect_model(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,
+) -> None:
+    """Test autodetect_model for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
     connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
     with patch.object(
         connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
     ):
         connector.autodetect_model()
-    assert isinstance(connector.switch_model, MS308E)
-    assert connector.switch_model.MODEL_NAME == "MS308E"
-    assert connector.ports == 8
+    assert isinstance(connector.switch_model, switch_model)
+    assert connector.switch_model.MODEL_NAME == switch_model.MODEL_NAME
+    assert connector.ports == expected_ports
 
 
-def test_ms308e_get_login_cookie() -> None:
-    """Test get_login_cookie for MS308E via JSON REST API."""
-    helper = MS308ETestHelper()
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_login_cookie(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_login_cookie for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
     connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
     with patch.object(
         connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
@@ -657,9 +677,16 @@ def test_ms308e_get_login_cookie() -> None:
         assert connector.get_login_cookie() is True
 
 
-def test_ms308e_delete_login_cookie() -> None:
-    """Test delete_login_cookie for MS308E clears bearer token."""
-    helper = MS308ETestHelper()
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_delete_login_cookie(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test delete_login_cookie for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
     connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
     with patch.object(
         connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
@@ -671,16 +698,31 @@ def test_ms308e_delete_login_cookie() -> None:
     assert connector._page_fetcher.has_bearer_token() is False
 
 
-def test_ms308e_get_unique_id() -> None:
-    """Test get_unique_id for MS308E."""
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_unique_id(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_unique_id for JSON REST API switches."""
     connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
-    connector.switch_model = MS308E
-    assert connector.get_unique_id() == "ms308e_192_168_0_1"
+    connector.switch_model = switch_model
+    expected = f"{switch_model.MODEL_NAME.lower()}_192_168_0_1"
+    assert connector.get_unique_id() == expected
 
 
-def test_ms308e_get_switch_infos() -> None:
-    """Test get_switch_infos for MS308E via JSON REST API."""
-    helper = MS308ETestHelper()
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_switch_infos(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_switch_infos for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
     with patch("py_netgear_plus.time.perf_counter", return_value=0):
         connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
         with patch.object(
@@ -699,7 +741,7 @@ def test_ms308e_get_switch_infos() -> None:
             ):
                 switch_data = connector.get_switch_infos()
             with Path(
-                f"pages/MS308E/{sequence}/switch_infos.json"
+                f"pages/{switch_model.MODEL_NAME}/{sequence}/switch_infos.json"
             ).open() as file:
                 validation_data = json.loads(file.read())
                 assert switch_data == validation_data
