@@ -726,11 +726,26 @@ class MS308E(AutodetectedSwitchModel):
     PORTS = 8
     API_TYPE: ClassVar = "json_rest"
     CHECKS_AND_RESULTS: ClassVar = []
-    AUTODETECT_TEMPLATES: ClassVar = []
-    LOGIN_TEMPLATE: ClassVar = {}
-    SWITCH_INFO_TEMPLATES: ClassVar = []
-    PORT_STATUS_TEMPLATES: ClassVar = []
-    PORT_STATISTICS_TEMPLATES: ClassVar = []
+    AUTODETECT_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/system/status"},
+    ]
+    LOGIN_TEMPLATE: ClassVar = {
+        "method": "patch",
+        "url": "http://{ip}/api/system/login",
+    }
+    LOGIN_SESSION_TEMPLATE: ClassVar = {
+        "method": "post",
+        "url": "http://{ip}/api/login_session",
+    }
+    SWITCH_INFO_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/system/status"},
+    ]
+    PORT_STATUS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/ports"},
+    ]
+    PORT_STATISTICS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/ports/statistics"},
+    ]
     LOGOUT_TEMPLATES: ClassVar = []
 
 

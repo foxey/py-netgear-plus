@@ -118,10 +118,16 @@ class NetgearSwitchConnector:
 
     def _json_api_login(self) -> bool:
         """Login via JSON REST API (MS-series switches)."""
+        login_template = self.switch_model.LOGIN_TEMPLATE
+        login_url = login_template["url"].format(ip=self.host)
+        login_method = login_template["method"]
+        session_template = self.switch_model.LOGIN_SESSION_TEMPLATE
+        session_url = session_template["url"].format(ip=self.host)
+        session_method = session_template["method"]
         try:
             response = self._page_fetcher.json_request(
-                "patch",
-                f"http://{self.host}/api/system/login",
+                login_method,
+                login_url,
                 data={"password": self._password},
             )
             if not self._page_fetcher.has_ok_status(response):
@@ -135,8 +141,8 @@ class NetgearSwitchConnector:
                 return False
             self._page_fetcher.set_bearer_token(token)
             response2 = self._page_fetcher.json_request(
-                "post",
-                f"http://{self.host}/api/login_session",
+                session_method,
+                session_url,
                 data={"id": session_id, "status": True},
             )
             if not self._page_fetcher.has_ok_status(response2):
@@ -166,31 +172,40 @@ class NetgearSwitchConnector:
 
     def _autodetect_json_api(self) -> type[AutodetectedSwitchModel] | None:
         """Try to detect switch model via JSON REST API."""
-        with suppress(PageFetcherConnectionError):
-            url = f"http://{self.host}/api/system/status"
-            response = self._page_fetcher.json_request("get", url)
-            if (
-                response.status_code == status_code_unauthorized
-                and self._json_api_login()
-            ):
-                response = self._page_fetcher.json_request("get", url)
-            if not self._page_fetcher.has_ok_status(response):
-                return None
-            try:
-                data = response.json()
-                model_number = data.get("systemInfo", {}).get(
-                    "modelNumber", ""
-                )
-                for mdl_cls in MODELS:
-                    mdl = mdl_cls()
-                    if model_number == mdl.MODEL_NAME:
-                        self._set_instance_attributes_by_model(mdl)
-                        self._page_parser = create_page_parser(
-                            self.switch_model.MODEL_NAME
+        json_api_models = [
+            m for m in MODELS
+            if getattr(m, "API_TYPE", "") == "json_rest"
+        ]
+        for mdl_cls in json_api_models:
+            mdl = mdl_cls()
+            for template in mdl.AUTODETECT_TEMPLATES:
+                url = template["url"].format(ip=self.host)
+                method = template["method"]
+                with suppress(PageFetcherConnectionError):
+                    self._set_instance_attributes_by_model(mdl)
+                    response = self._page_fetcher.json_request(method, url)
+                    if (
+                        response.status_code == status_code_unauthorized
+                        and self._json_api_login()
+                    ):
+                        response = self._page_fetcher.json_request(
+                            method, url
                         )
-                        return self.switch_model
-            except (ValueError, KeyError):
-                pass
+                    if not self._page_fetcher.has_ok_status(response):
+                        continue
+                    try:
+                        data = response.json()
+                        model_number = data.get("systemInfo", {}).get(
+                            "modelNumber", ""
+                        )
+                        if model_number == mdl.MODEL_NAME:
+                            self._page_parser = create_page_parser(
+                                self.switch_model.MODEL_NAME
+                            )
+                            return self.switch_model
+                    except (ValueError, KeyError):
+                        pass
+        self.switch_model = AutodetectedSwitchModel
         return None
 
     def autodetect_model(self) -> type[AutodetectedSwitchModel]:
@@ -555,9 +570,10 @@ class NetgearSwitchConnector:
         if not self.switch_model:
             self.autodetect_model()
         if self._is_json_api:
-            page = self._json_api_fetch(
-                f"http://{self.host}/api/system/status"
+            url = self.switch_model.SWITCH_INFO_TEMPLATES[0]["url"].format(
+                ip=self.host
             )
+            page = self._json_api_fetch(url)
         else:
             page = self.fetch_page_from_templates(
                 self.switch_model.SWITCH_INFO_TEMPLATES
@@ -577,9 +593,10 @@ class NetgearSwitchConnector:
 
     def _get_port_statistics(self) -> dict[str, Any]:
         if self._is_json_api:
-            response = self._json_api_fetch(
-                f"http://{self.host}/api/ports/statistics"
+            url = self.switch_model.PORT_STATISTICS_TEMPLATES[0]["url"].format(
+                ip=self.host
             )
+            response = self._json_api_fetch(url)
         else:
             response = self.fetch_page_from_templates(
                 self.switch_model.PORT_STATISTICS_TEMPLATES
@@ -784,9 +801,10 @@ class NetgearSwitchConnector:
     def _get_port_status(self) -> dict:
         switch_data = {}
         if self._is_json_api:
-            response_portstatus = self._json_api_fetch(
-                f"http://{self.host}/api/ports"
+            url = self.switch_model.PORT_STATUS_TEMPLATES[0]["url"].format(
+                ip=self.host
             )
+            response_portstatus = self._json_api_fetch(url)
         else:
             response_portstatus = self.fetch_page_from_templates(
                 self.switch_model.PORT_STATUS_TEMPLATES
