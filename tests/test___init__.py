@@ -22,6 +22,8 @@ from py_netgear_plus.models import (
     GS308EPP,
     GS316EPP,
     JGS516PE,
+    MS305E,
+    MS308E,
     XS512EM,
     AutodetectedSwitchModel,
     GS105Ev2,
@@ -582,6 +584,168 @@ def test_reboot(
                 timeout=URL_REQUEST_TIMEOUT,
                 allow_redirects=False,
             )
+
+
+class JsonApiTestHelper:
+    """Helper for JSON REST API switch tests (MS3xx series)."""
+
+    def __init__(self, model_name: str) -> None:
+        """Initialize the JSON API test helper."""
+        self.data_dir = Path(f"pages/{model_name}")
+        self._sequence = 0
+
+    def next_sequence(self) -> int:
+        """Get the next sequence number."""
+        self._sequence += 1
+        return self._sequence
+
+    @staticmethod
+    def make_json_response(filepath: Path) -> Mock:
+        """Create a mock response from a JSON file."""
+        resp = Mock()
+        resp.status_code = requests.codes.ok
+        content = filepath.read_bytes()
+        resp.content = content
+        resp.json.return_value = json.loads(content)
+        return resp
+
+    def mock_json_request(self, method: str, url: str, **kwargs: dict) -> Mock:  # noqa: ARG002
+        """Mock json_request based on URL."""
+        if "/api/system/status" in url:
+            return self.make_json_response(self.data_dir / "system_status.json")
+        if "/api/system/login" in url:
+            return self.make_json_response(self.data_dir / "login.json")
+        if "/api/login_session" in url:
+            return self.make_json_response(self.data_dir / "login_session.json")
+        if "/api/ports/statistics" in url:
+            return self.make_json_response(
+                self.data_dir / str(self._sequence) / "ports_statistics.json"
+            )
+        if "/api/ports" in url:
+            return self.make_json_response(
+                self.data_dir / str(self._sequence) / "ports.json"
+            )
+        resp = Mock()
+        resp.status_code = requests.codes.not_found
+        return resp
+
+
+JSON_API_MODELS = [
+    (MS305E, 5),
+    (MS308E, 8),
+]
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_autodetect_model(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,
+) -> None:
+    """Test autodetect_model for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    with patch.object(
+        connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
+    ):
+        connector.autodetect_model()
+    assert isinstance(connector.switch_model, switch_model)
+    assert connector.switch_model.MODEL_NAME == switch_model.MODEL_NAME
+    assert connector.ports == expected_ports
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_login_cookie(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_login_cookie for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    with patch.object(
+        connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
+    ):
+        connector.autodetect_model()
+        assert connector.get_login_cookie() is True
+        assert connector._page_fetcher.has_bearer_token() is True
+        # Second call should return True without re-login
+        assert connector.get_login_cookie() is True
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_delete_login_cookie(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test delete_login_cookie for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    with patch.object(
+        connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
+    ):
+        connector.autodetect_model()
+        connector.get_login_cookie()
+    assert connector._page_fetcher.has_bearer_token() is True
+    connector.delete_login_cookie()
+    assert connector._page_fetcher.has_bearer_token() is False
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_unique_id(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_unique_id for JSON REST API switches."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector.switch_model = switch_model
+    expected = f"{switch_model.MODEL_NAME.lower()}_192_168_0_1"
+    assert connector.get_unique_id() == expected
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_switch_infos(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_switch_infos for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    with patch("py_netgear_plus.time.perf_counter", return_value=0):
+        connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+        with patch.object(
+            connector._page_fetcher,
+            "json_request",
+            side_effect=helper.mock_json_request,
+        ):
+            connector.autodetect_model()
+            connector.get_login_cookie()
+
+        for sequence in range(2):
+            with patch.object(
+                connector._page_fetcher,
+                "json_request",
+                side_effect=helper.mock_json_request,
+            ):
+                switch_data = connector.get_switch_infos()
+            with Path(
+                f"pages/{switch_model.MODEL_NAME}/{sequence}/switch_infos.json"
+            ).open() as file:
+                validation_data = json.loads(file.read())
+                assert switch_data == validation_data
+            helper.next_sequence()
 
 
 if __name__ == "__main__":

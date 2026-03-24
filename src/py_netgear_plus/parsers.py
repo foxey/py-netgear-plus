@@ -1,5 +1,6 @@
 """Definitions of html parsers for Netgear Plus switches."""
 
+import json
 import logging
 import re
 from typing import Any
@@ -1285,6 +1286,113 @@ class GS116Ev2(JGSxxxSeries):
 
     def __init__(self) -> None:
         """Initialize the GS116Ev2 parser."""
+        super().__init__()
+
+
+class MS3xxSeries(PageParser):
+    """Parser for MS3xx series switches (JSON REST API)."""
+
+    def __init__(self) -> None:
+        """Initialize the MS3xx series parser."""
+        super().__init__()
+
+    def parse_switch_metadata(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse switch info from the JSON API response."""
+        data = json.loads(page.content)
+        system_info = data.get("systemInfo", {})
+        self._switch_firmware = system_info.get("firmwareVersion", "")
+        self._switch_bootloader = ""
+        return {
+            "switch_name": system_info.get("switchName", ""),
+            "switch_serial_number": system_info.get("serialNumber", ""),
+            "switch_bootloader": self._switch_bootloader,
+            "switch_firmware": self._switch_firmware,
+        }
+
+    def parse_port_status(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[int, dict[str, Any]]:
+        """Parse port status from the JSON API response."""
+        del ports
+        data = json.loads(page.content)
+        status_by_port: dict[int, dict[str, Any]] = {}
+        for port_conf in data.get("portConfs", []):
+            port_no = int(port_conf["portNo"])
+            link_speed = str(port_conf.get("linkSpeed", ""))
+            # Strip duplex suffix (e.g. "100M_F" -> "100M")
+            connection_speed = re.sub(r"_[FH]$", "", link_speed)
+            is_connected = (
+                bool(link_speed)
+                and link_speed.lower() not in ("down", "disabled")
+            )
+            status_by_port[port_no] = {
+                "status": "Up" if is_connected else "Down",
+                "modus_speed": str(port_conf.get("linkSpeedConf", "")),
+                "connection_speed": connection_speed,
+            }
+        self.port_status = status_by_port
+        return status_by_port
+
+    def parse_port_statistics(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[str, Any]:
+        """Parse port statistics from the JSON API response."""
+        data = json.loads(page.content)
+        rx = []
+        tx = []
+        crc = []
+        for port_stat in data.get("portStatistics", []):
+            rx.append(int(port_stat.get("bytesRecv", 0)))
+            tx.append(int(port_stat.get("bytesSend", 0)))
+            crc.append(int(port_stat.get("crcPackets", 0)))
+        # Pad to expected number of ports
+        while len(rx) < ports:
+            rx.append(0)
+            tx.append(0)
+            crc.append(0)
+        io_zeros = [0] * ports
+        return {
+            "traffic_rx": rx,
+            "traffic_tx": tx,
+            "sum_rx": rx,
+            "sum_tx": tx,
+            "crc_errors": crc,
+            "speed_io": io_zeros,
+        }
+
+    def parse_client_hash(self, page: Response | BaseResponse) -> str | None:
+        """No client hash for JSON REST API switches."""
+        del page
+        return None
+
+    def parse_error(self, page: Response | BaseResponse) -> str | None:
+        """Parse error from the JSON API response."""
+        try:
+            data = json.loads(page.content)
+            if data.get("errCode", 0) != 0:
+                return data.get("message", "Unknown error")
+        except (ValueError, AttributeError):
+            pass
+        return None
+
+    def has_api_v2(self) -> bool:
+        """JSON REST API switches do not use the v2 HTML API."""
+        return False
+
+
+class MS305E(MS3xxSeries):
+    """Parser for the MS305E switch."""
+
+    def __init__(self) -> None:
+        """Initialize the MS305E parser."""
+        super().__init__()
+
+
+class MS308E(MS3xxSeries):
+    """Parser for the MS308E switch."""
+
+    def __init__(self) -> None:
+        """Initialize the MS308E parser."""
         super().__init__()
 
 
