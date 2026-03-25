@@ -569,9 +569,9 @@ class GS108Ev4(PageParser):
                     './/span[contains(@class, "padding_r_18")]/span/text()'
                 )[0]
                 speed = blocks[port_nr].xpath('.//input[@class="Speed"]/@value')[0]
-                connection_speed_text = blocks[port_nr].xpath(
-                    './/input[@class="LinkedSpeed"]/@value'
-                )[0]
+                connection_speed_text = strip_duplex(
+                    blocks[port_nr].xpath('.//input[@class="LinkedSpeed"]/@value')[0]
+                )
                 modus_speed_text = [
                     "0",
                     "Auto",
