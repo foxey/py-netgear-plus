@@ -7,6 +7,20 @@ Contributing to this project should be as easy and transparent as possible, whet
 - Submitting a fix
 - Proposing new features
 
+## Project Maintenance
+
+The project owner [@foxey](https://github.com/foxey) currently lacks the time to actively review and support this project on a day-to-day basis.
+
+To keep the project moving, review duties have been delegated to **Ada**, an AI assistant powered by [NanoClaw](https://github.com/foxey/nanoclaw). Ada will handle:
+
+- Reviewing pull requests and posting feedback
+- Triaging issues
+- Merging approved contributions
+
+Ada acts on behalf of @foxey. Final decisions on architectural changes or significant new features may still be escalated to @foxey directly.
+
+If you're unsure whether your question needs a human, just open an issue or PR as usual — Ada will respond.
+
 ## Github is used for everything
 
 Github is used to host code, to track issues and feature requests, as well as accept pull requests.
@@ -54,17 +68,3 @@ if you use Visual Studio Code.
 ## License
 
 By contributing, you agree that your contributions will be licensed under its Apache License.
-
-## Project Maintenance
-
-The project owner [@foxey](https://github.com/foxey) currently lacks the time to actively review and support this project on a day-to-day basis.
-
-To keep the project moving, review duties have been delegated to **Ada**, an AI assistant powered by [NanoClaw](https://github.com/foxey/nanoclaw). Ada will handle:
-
-- Reviewing pull requests and posting feedback
-- Triaging issues
-- Merging approved contributions
-
-Ada acts on behalf of @foxey. Final decisions on architectural changes or significant new features may still be escalated to @foxey directly.
-
-If you're unsure whether your question needs a human, just open an issue or PR as usual — Ada will respond.
