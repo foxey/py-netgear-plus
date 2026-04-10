@@ -35,6 +35,11 @@ class LoginFailedError(Exception):
     """Invalid credentials."""
 
 
+class MaxSessionsError(Exception):
+    """Maximum number of sessions reached on the switch."""
+
+
+
 class NotLoggedInError(Exception):
     """Not logged in."""
 
