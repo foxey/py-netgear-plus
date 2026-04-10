@@ -176,22 +176,17 @@ class NetgearSwitchConnector:
     def _autodetect_json_api(self) -> type[AutodetectedSwitchModel] | None:
         """Try to detect switch model via JSON REST API."""
         json_api_models = [
-            m for m in MODELS
-            if getattr(m, "API_TYPE", "") == "json_rest"
+            m for m in MODELS if getattr(m, "API_TYPE", "") == "json_rest"
         ]
         for mdl_cls in json_api_models:
             mdl = mdl_cls()
             # Temporarily set model so login templates are available
             self._set_instance_attributes_by_model(mdl)
             with suppress(PageFetcherConnectionError, PageNotLoadedError):
-                response = self._json_api_fetch(
-                    mdl.AUTODETECT_TEMPLATES
-                )
+                response = self._json_api_fetch(mdl.AUTODETECT_TEMPLATES)
                 try:
                     data = response.json()
-                    model_number = data.get("systemInfo", {}).get(
-                        "modelNumber", ""
-                    )
+                    model_number = data.get("systemInfo", {}).get("modelNumber", "")
                     if model_number == mdl.MODEL_NAME:
                         self._page_parser = create_page_parser(
                             self.switch_model.MODEL_NAME
@@ -564,9 +559,7 @@ class NetgearSwitchConnector:
         if not self.switch_model:
             self.autodetect_model()
         if self._is_json_api:
-            page = self._json_api_fetch(
-                self.switch_model.SWITCH_INFO_TEMPLATES
-            )
+            page = self._json_api_fetch(self.switch_model.SWITCH_INFO_TEMPLATES)
         else:
             page = self.fetch_page_from_templates(
                 self.switch_model.SWITCH_INFO_TEMPLATES
@@ -586,9 +579,7 @@ class NetgearSwitchConnector:
 
     def _get_port_statistics(self) -> dict[str, Any]:
         if self._is_json_api:
-            response = self._json_api_fetch(
-                self.switch_model.PORT_STATISTICS_TEMPLATES
-            )
+            response = self._json_api_fetch(self.switch_model.PORT_STATISTICS_TEMPLATES)
         else:
             response = self.fetch_page_from_templates(
                 self.switch_model.PORT_STATISTICS_TEMPLATES

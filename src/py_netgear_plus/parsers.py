@@ -1321,9 +1321,9 @@ class MS3xxSeries(PageParser):
             link_speed = str(port_conf.get("linkSpeed", ""))
             # Strip duplex suffix (e.g. "100M_F" -> "100M")
             connection_speed = re.sub(r"_[FH]$", "", link_speed)
-            is_connected = (
-                bool(link_speed)
-                and link_speed.lower() not in ("down", "disabled")
+            is_connected = bool(link_speed) and link_speed.lower() not in (
+                "down",
+                "disabled",
             )
             status_by_port[port_no] = {
                 "status": "Up" if is_connected else "Down",
@@ -1345,11 +1345,15 @@ class MS3xxSeries(PageParser):
             rx.append(int(port_stat.get("bytesRecv", 0)))
             tx.append(int(port_stat.get("bytesSend", 0)))
             crc.append(int(port_stat.get("crcPackets", 0)))
-        # Pad to expected number of ports
+        # Pad to expected number of ports in case the API returns fewer
+        # entries than the model's port count (e.g. ports not yet initialised).
         while len(rx) < ports:
             rx.append(0)
             tx.append(0)
             crc.append(0)
+        # The JSON API only provides cumulative byte counts, not real-time
+        # speed, so speed_io is always zero. The caller computes speed from
+        # the delta between consecutive cumulative readings.
         io_zeros = [0] * ports
         return {
             "traffic_rx": rx,
