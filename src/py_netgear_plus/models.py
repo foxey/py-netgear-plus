@@ -654,13 +654,6 @@ class GS316EPP(GS316EP):
         ("check_login_form_rand", [True]),
         ("parse_login_title_tag", ["GS316EPP"]),
     ]
-    SWITCH_REBOOT_TEMPLATES: ClassVar = [
-        {
-            "method": "post",
-            "url": "http://{ip}/iss/specific/sys_reload.html",
-            "params": {"Gambit": "_gambit", "ACTION": "literal:Reload"},
-        }
-    ]
 
 
 class JGSxxxSeries(AutodetectedSwitchModel):
