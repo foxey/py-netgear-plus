@@ -44,6 +44,25 @@ def _from_bytes_to_megabytes(v: float) -> float:
     return float(f"{round(v * bytes_to_mbytes, 2):.2f}")
 
 
+def _normalize_flow_control(value: Any) -> int | None:
+    """Return protocol value for flow control when it can be inferred."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 2
+    if isinstance(value, int):
+        if value in (1, 2):
+            return value
+        return None
+
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "enable", "enabled", "aktiv"}:
+        return 1
+    if normalized in {"2", "false", "disable", "disabled", "deaktiviert"}:
+        return 2
+    return None
+
+
 class InvalidPortStatusError(Exception):
     """Number of statusses do not match number of ports."""
 
@@ -707,9 +726,9 @@ class NetgearSwitchConnector:
                     )
                 else:
                     switch_data[f"port_{port_number}_connection_speed"] = 0
-                if port_status[port_number].get("description"):
+                if port_status[port_number].get("description") is not None:
                     switch_data[f"port_{port_number}_description"] = port_status[port_number].get("description")
-                if port_status[port_number].get("flow_control"):
+                if port_status[port_number].get("flow_control") is not None:
                     switch_data[f"port_{port_number}_flow_control"] = port_status[port_number].get("flow_control")
             else:
                 message = (
@@ -837,24 +856,32 @@ class NetgearSwitchConnector:
 
     def switch_port(self, port: int, state: str) -> bool:
         """Enable or disable a regular port."""
+        if not self.switch_model.MODEL_NAME:
+            self.autodetect_model()
         if state not in SWITCH_STATES:
             message = f'State "{state}" not in {SWITCH_STATES}.'
             raise InvalidSwitchStateError(message)
+        if not self.switch_model.SWITCH_PORT_TEMPLATES:
+            message = "No switch port templates found."
+            raise NotImplementedError(message)
         if port < 1 or port > self.ports:
             message = f"Port {port} not in range 1-{self.ports}."
             raise PortNumberOutofRangeError(message)
 
         current_info = self.get_switch_infos()
-        desc = current_info.get(f"port_{port}_description", "")
-        flow_raw = current_info.get(f"port_{port}_flow_control", "")
-        flow = 1 if str(flow_raw).lower() in ("enable", "enabled", "1", "true") else 2
+        desc_key = f"port_{port}_description"
+        flow_key = f"port_{port}_flow_control"
 
         for template in self.switch_model.SWITCH_PORT_TEMPLATES:
             url = template["url"].format(ip=self.host)
             method = template["method"]
             data = self.switch_model.get_switch_port_data(port, state)
-            data["DESCRIPTION"] = desc
-            data["FLOW_CONTROL"] = flow
+            if desc_key in current_info:
+                data["DESCRIPTION"] = current_info[desc_key]
+            if flow_key in current_info:
+                flow = _normalize_flow_control(current_info[flow_key])
+                if flow is not None:
+                    data["FLOW_CONTROL"] = flow
             self._page_fetcher.set_data_from_template(template, self, data)
             _LOGGER.debug("switch_port data=%s", data)
             response = BaseResponse

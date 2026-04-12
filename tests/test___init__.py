@@ -111,6 +111,9 @@ MODELS_FOR_REBOOT = [
 ]
 
 TEST_MODELS = [model[0] for model in MODEL_PARAMETERS]
+PORT_SWITCH_MODELS = [
+    switch_model for switch_model in TEST_MODELS if switch_model.SWITCH_PORT_TEMPLATES
+]
 
 
 class PyTestPageFetcher:
@@ -418,36 +421,20 @@ def test_get_switch_infos(switch_model: type[AutodetectedSwitchModel]) -> None:
         for sequence in range(2):
             connector._page_fetcher._login_page_response.status_code = requests.codes.ok
             switch_data = connector.get_switch_infos()
-            # Remove description and flow_control fields because they are not in the validation data
-            # for some models in the existing test pages.
-            filtered_data = {
-                k: v
-                for k, v in switch_data.items()
-                if not (k.endswith("_description") or k.endswith("_flow_control"))
-            }
-
             with Path(
                 f"pages/{switch_model.MODEL_NAME}/{sequence}/switch_infos.json"
             ).open() as file:
                 validation_data = json.loads(file.read())
-                filtered_validation_data = {
-                    k: v
-                    for k, v in validation_data.items()
-                    if not (k.endswith("_description") or k.endswith("_flow_control"))
-                }
-                assert filtered_data == filtered_validation_data
+                assert switch_data == validation_data
             page_fetcher.next_sequence()
 
 
 @pytest.mark.parametrize(
     "switch_model",
-    TEST_MODELS,
+    PORT_SWITCH_MODELS,
 )
 def test_turn_on_and_off_port(switch_model: type[AutodetectedSwitchModel]) -> None:
     """Test turning on/off a regular port."""
-    if not switch_model.SWITCH_PORT_TEMPLATES:
-        pytest.skip(f"Model {switch_model.MODEL_NAME} has no SWITCH_PORT_TEMPLATES.")
-
     with (
         patch(
             "py_netgear_plus.NetgearSwitchConnector.fetch_page_from_templates"
@@ -525,6 +512,89 @@ def test_turn_on_and_off_port(switch_model: type[AutodetectedSwitchModel]) -> No
                     timeout=URL_REQUEST_TIMEOUT,
                     allow_redirects=False,
                 )
+
+
+@pytest.mark.parametrize(
+    "switch_model",
+    PORT_SWITCH_MODELS,
+)
+def test_switch_port_uses_model_defaults_when_optional_fields_missing(
+    switch_model: type[AutodetectedSwitchModel],
+) -> None:
+    """Test switching a port without description/flow-control data."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector._set_instance_attributes_by_model(switch_model())
+    connector._client_hash = "client_hash"
+    connector.set_cookie("cookie_name", "cookie_value")
+
+    response = Mock()
+    response.status_code = requests.codes.ok
+    response.content = b"SUCCESS"
+    with patch(
+        "py_netgear_plus.fetcher.requests.request",
+        return_value=response,
+    ) as mock_request:
+        cookies = requests.cookies.RequestsCookieJar()
+        cookies.set(
+            str(connector.get_cookie()[0]),
+            str(connector.get_cookie()[1]),
+            domain=connector.host,
+            path="/",
+        )
+
+        port = 1
+        with patch(
+            "py_netgear_plus.NetgearSwitchConnector.get_switch_infos",
+            return_value={},
+        ):
+            assert connector.switch_port(port, "off") is True
+
+        expected_data = connector.switch_model.get_switch_port_data(port, "off").copy()
+        expected_data["hash"] = connector._client_hash
+        mock_request.assert_called_with(
+            connector.switch_model.SWITCH_PORT_TEMPLATES[0]["method"],
+            connector.switch_model.SWITCH_PORT_TEMPLATES[0]["url"].format(
+                ip=connector.host
+            ),
+            data=expected_data,
+            cookies=cookies,
+            timeout=URL_REQUEST_TIMEOUT,
+            allow_redirects=False,
+        )
+
+
+@pytest.mark.parametrize(
+    "switch_model",
+    PORT_SWITCH_MODELS,
+)
+def test_switch_port_autodetects_before_validating_port_range(
+    switch_model: type[AutodetectedSwitchModel],
+) -> None:
+    """Test switch_port performs lazy autodetection."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+
+    def _autodetect() -> type[AutodetectedSwitchModel]:
+        connector._set_instance_attributes_by_model(switch_model())
+        return switch_model
+
+    with patch.object(connector, "autodetect_model", side_effect=_autodetect):
+        connector._client_hash = "client_hash"
+        connector.set_cookie("cookie_name", "cookie_value")
+
+        response = Mock()
+        response.status_code = requests.codes.ok
+        response.content = b"SUCCESS"
+        with (
+            patch(
+                "py_netgear_plus.fetcher.requests.request",
+                return_value=response,
+            ),
+            patch(
+                "py_netgear_plus.NetgearSwitchConnector.get_switch_infos",
+                return_value={},
+            ),
+        ):
+            assert connector.turn_off_port(1) is True
 
 
 @pytest.mark.parametrize(

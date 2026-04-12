@@ -161,8 +161,6 @@ class GS105Ev2(AutodetectedSwitchModel):
         return {
             f"port{port}": "checked",
             "SPEED": 1 if state == "on" else 2,
-            "FLOW_CONTROL": 2,
-            "DESCRIPTION": "",
         }
 
 class GS105PE(GS105Ev2):
