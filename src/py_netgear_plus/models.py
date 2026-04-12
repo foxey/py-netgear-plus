@@ -154,13 +154,6 @@ class GS105Ev2(AutodetectedSwitchModel):
             "params": {"hash": "_client_hash"},
         }
     ]
-    SWITCH_REBOOT_TEMPLATES: ClassVar = [
-        {
-            "method": "post",
-            "url": "http://{ip}/device_reboot.cgi",
-            "params": {"CBox": "literal:on", "hash": "_client_hash"},
-        }
-    ]
     LOGOUT_TEMPLATES: ClassVar = [{"method": "get", "url": "http://{ip}/logout.cgi"}]
 
     def get_switch_port_data(self, port: int, state: str) -> dict:
@@ -173,7 +166,7 @@ class GS105Ev2(AutodetectedSwitchModel):
         }
 
 class GS105PE(GS105Ev2):
-    """Definition for Netgear GS105PE model."""
+    """Definition for Netgear GS105PE model. Inherits port switching from GS105Ev2."""
 
     MODEL_NAME = "GS105PE"
     PORTS = 5

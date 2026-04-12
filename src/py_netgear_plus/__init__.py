@@ -836,11 +836,6 @@ class NetgearSwitchConnector:
         return False
 
     def switch_port(self, port: int, state: str) -> bool:
-        current_info = self.get_switch_infos()
-        desc = current_info.get(f"port_{port}_description", "")
-        flow_raw = current_info.get(f"port_{port}_flow_control", "")
-        flow = 1 if str(flow_raw).lower() in ("enable", "enabled", "1", "true") else 2
-
         """Enable or disable a regular port."""
         if state not in SWITCH_STATES:
             message = f'State "{state}" not in {SWITCH_STATES}.'
@@ -848,6 +843,11 @@ class NetgearSwitchConnector:
         if port < 1 or port > self.ports:
             message = f"Port {port} not in range 1-{self.ports}."
             raise PortNumberOutofRangeError(message)
+
+        current_info = self.get_switch_infos()
+        desc = current_info.get(f"port_{port}_description", "")
+        flow_raw = current_info.get(f"port_{port}_flow_control", "")
+        flow = 1 if str(flow_raw).lower() in ("enable", "enabled", "1", "true") else 2
 
         for template in self.switch_model.SWITCH_PORT_TEMPLATES:
             url = template["url"].format(ip=self.host)
