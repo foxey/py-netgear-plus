@@ -599,6 +599,45 @@ def test_switch_port_autodetects_before_validating_port_range(
 
 @pytest.mark.parametrize(
     "switch_model",
+    PORT_SWITCH_MODELS,
+)
+def test_switch_port_accepts_pending_apply_page(
+    switch_model: type[AutodetectedSwitchModel],
+) -> None:
+    """Test switching a port when the switch replies with a wait page."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector._set_instance_attributes_by_model(switch_model())
+    connector._client_hash = "client_hash"
+    connector.set_cookie("cookie_name", "cookie_value")
+
+    response = Mock()
+    response.status_code = requests.codes.ok
+    response.content = b"""<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="refresh" content = 4>
+</head>
+<body>Please wait...<input type='hidden' name='hash' value='4554'></body>
+</html>"""
+
+    with (
+        patch(
+            "py_netgear_plus.fetcher.requests.request",
+            return_value=response,
+        ),
+        patch("py_netgear_plus.time.sleep") as mock_sleep,
+        patch(
+            "py_netgear_plus.NetgearSwitchConnector.get_switch_infos",
+            return_value={},
+        ),
+    ):
+        assert connector.turn_off_port(1) is True
+        mock_sleep.assert_called_with(4.0)
+        assert connector._client_hash == "4554"
+
+
+@pytest.mark.parametrize(
+    "switch_model",
     TEST_MODELS,
 )
 def test_turn_on_and_off_poe_port(switch_model: type[AutodetectedSwitchModel]) -> None:

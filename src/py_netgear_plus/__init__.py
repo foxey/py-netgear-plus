@@ -1,6 +1,7 @@
 """Netgear API."""
 
 import logging
+import re
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -61,6 +62,23 @@ def _normalize_flow_control(value: Any) -> int | None:
     if normalized in {"2", "false", "disable", "disabled", "deaktiviert"}:
         return 2
     return None
+
+
+def _get_pending_apply_delay(response: Response | BaseResponse) -> float | None:
+    """Return wait time if switch accepted a change and asks to wait."""
+    if not getattr(response, "content", None):
+        return None
+
+    content = response.content
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    if b"Please wait..." not in content:
+        return None
+
+    match = re.search(rb'http-equiv="refresh"\s+content\s*=\s*["\']?\s*(\d+)', content)
+    if match:
+        return float(match.group(1))
+    return 4.0
 
 
 class InvalidPortStatusError(Exception):
@@ -897,6 +915,16 @@ class NetgearSwitchConnector:
                 self._page_fetcher.has_ok_status(response)
                 and str(response.content.strip()) == "b'SUCCESS'"
             ):
+                return True
+            pending_apply_delay = _get_pending_apply_delay(response)
+            if pending_apply_delay is not None:
+                with suppress(NetgearPlusPageParserError):
+                    self._client_hash = self._page_parser.parse_client_hash(response)
+                _LOGGER.info(
+                    "NetgearSwitchConnector.switch_port change accepted, waiting %.1fs for switch to apply it",
+                    pending_apply_delay,
+                )
+                time.sleep(pending_apply_delay)
                 return True
             _LOGGER.warning(
                 "NetgearSwitchConnector.switch_port response was %s",
