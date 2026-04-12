@@ -152,7 +152,7 @@ class PageFetcher:
     def get_page_from_file(self, url: str) -> BaseResponse:
         """Get page from file."""
         response = BaseResponse()
-        page_name = url.split("/")[-1] or DEFAULT_PAGE
+        page_name = url.rsplit(sep="/", maxsplit=1)[-1] or DEFAULT_PAGE
         path = Path(f"{self.offline_path_prefix}/{page_name}")
         if path.exists():
             with path.open("r") as file:
