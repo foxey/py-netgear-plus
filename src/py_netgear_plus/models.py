@@ -32,6 +32,7 @@ class AutodetectedSwitchModel:
     POE_MAX_POWER_ALL_PORTS = None
     POE_MAX_POWER_SINGLE_PORT = None
     POE_SCHEDULING = False
+    API_TYPE: ClassVar = ""
     CHECKS_AND_RESULTS: ClassVar = []
 
     AUTODETECT_TEMPLATES: ClassVar = [
@@ -729,6 +730,48 @@ class GS116Ev2(JGSxxxSeries):
         ("check_login_form_rand", [False]),
         ("parse_first_script_tag", ["GS116Ev2"]),
     ]
+
+
+class MS3xxSeries(AutodetectedSwitchModel):
+    """Parent class definition for Netgear MS3xx series (JSON REST API)."""
+
+    API_TYPE: ClassVar = "json_rest"
+    CHECKS_AND_RESULTS: ClassVar = []
+    AUTODETECT_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/system/status"},
+    ]
+    LOGIN_TEMPLATE: ClassVar = {
+        "method": "patch",
+        "url": "http://{ip}/api/system/login",
+    }
+    LOGIN_SESSION_TEMPLATE: ClassVar = {
+        "method": "post",
+        "url": "http://{ip}/api/login_session",
+    }
+    SWITCH_INFO_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/system/status"},
+    ]
+    PORT_STATUS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/ports"},
+    ]
+    PORT_STATISTICS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/ports/statistics"},
+    ]
+    LOGOUT_TEMPLATES: ClassVar = []
+
+
+class MS305E(MS3xxSeries):
+    """Definition for Netgear MS305E model."""
+
+    MODEL_NAME = "MS305E"
+    PORTS = 5
+
+
+class MS308E(MS3xxSeries):
+    """Definition for Netgear MS308E model."""
+
+    MODEL_NAME = "MS308E"
+    PORTS = 8
 
 
 MODELS = get_all_child_classes_list(AutodetectedSwitchModel, "MODEL_NAME")
