@@ -410,7 +410,7 @@ class GS105Ev2(PageParser):
 
         for port_nr in range(ports):
             try:
-                description_text = (_port_elems[port_nr].text or '')
+                description_text = _port_elems[port_nr].text or ""
                 status_text = portstatus_elems[port_nr].text.strip()
                 modus_speed_text = portspeed_elems[port_nr].text.strip()
                 connection_speed_text = strip_duplex(
@@ -418,7 +418,9 @@ class GS105Ev2(PageParser):
                 )
                 flow_control_text = portflowcontrol_elems[port_nr].text.strip()
             except (IndexError, AttributeError):
-                description_text = self.port_status.get(port_nr + 1, {}).get("description", None)
+                description_text = self.port_status.get(port_nr + 1, {}).get(
+                    "description", None
+                )
                 status_text = self.port_status.get(port_nr + 1, {}).get("status", None)
                 modus_speed_text = self.port_status.get(port_nr + 1, {}).get(
                     "modus_speed", None
@@ -426,7 +428,9 @@ class GS105Ev2(PageParser):
                 connection_speed_text = self.port_status.get(port_nr + 1, {}).get(
                     "connection_speed", None
                 )
-                flow_control_text = self.port_status.get(port_nr + 1, {}).get("flow_control", None)
+                flow_control_text = self.port_status.get(port_nr + 1, {}).get(
+                    "flow_control", None
+                )
             status_by_port[port_nr + 1] = {
                 "description": description_text,
                 "status": status_text,

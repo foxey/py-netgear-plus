@@ -52,16 +52,22 @@ def _normalize_flow_control(value: Any) -> int | None:
     if isinstance(value, bool):
         return 1 if value else 2
     if isinstance(value, int):
-        if value in (1, 2):
-            return value
-        return None
+        return value if value in (1, 2) else None
 
     normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "enable", "enabled", "aktiv"}:
-        return 1
-    if normalized in {"2", "false", "disable", "disabled", "deaktiviert"}:
-        return 2
-    return None
+    flow_control_mapping = {
+        "1": 1,
+        "true": 1,
+        "enable": 1,
+        "enabled": 1,
+        "aktiv": 1,
+        "2": 2,
+        "false": 2,
+        "disable": 2,
+        "disabled": 2,
+        "deaktiviert": 2,
+    }
+    return flow_control_mapping.get(normalized)
 
 
 def _get_pending_apply_delay(response: Response | BaseResponse) -> float | None:
@@ -434,6 +440,32 @@ class NetgearSwitchConnector:
         if name == "gambitCookie":
             self._gambit = content
         return self._page_fetcher.set_cookie(name, content)
+
+    def _validate_switch_port_request(self, port: int, state: str) -> None:
+        """Validate switch_port inputs and model capabilities."""
+        if not self.switch_model.MODEL_NAME:
+            self.autodetect_model()
+        if state not in SWITCH_STATES:
+            message = f'State "{state}" not in {SWITCH_STATES}.'
+            raise InvalidSwitchStateError(message)
+        if not self.switch_model.SWITCH_PORT_TEMPLATES:
+            message = "No switch port templates found."
+            raise NotImplementedError(message)
+        if port < 1 or port > self.ports:
+            message = f"Port {port} not in range 1-{self.ports}."
+            raise PortNumberOutofRangeError(message)
+
+    def _request_switch_port_change(
+        self, method: str, url: str, data: dict[str, Any]
+    ) -> Response | BaseResponse:
+        """Send a switch_port request, retrying once after login refresh."""
+        try:
+            return self._page_fetcher.request(method, url, data)
+        except NotLoggedInError as error:
+            if self.get_login_cookie():
+                return self._page_fetcher.request(method, url, data)
+            message = "Not logged in and unable to login."
+            raise LoginFailedError(message) from error
 
     def delete_login_cookie(self) -> bool:
         """Logout and delete cookie."""
@@ -863,9 +895,13 @@ class NetgearSwitchConnector:
                 else:
                     switch_data[f"port_{port_number}_connection_speed"] = 0
                 if port_status[port_number].get("description") is not None:
-                    switch_data[f"port_{port_number}_description"] = port_status[port_number].get("description")
+                    switch_data[f"port_{port_number}_description"] = (
+                        port_status[port_number].get("description")
+                    )
                 if port_status[port_number].get("flow_control") is not None:
-                    switch_data[f"port_{port_number}_flow_control"] = port_status[port_number].get("flow_control")
+                    switch_data[f"port_{port_number}_flow_control"] = (
+                        port_status[port_number].get("flow_control")
+                    )
             else:
                 message = (
                     f"Number of statusses ({len(port_status)})"
@@ -992,17 +1028,7 @@ class NetgearSwitchConnector:
 
     def switch_port(self, port: int, state: str) -> bool:
         """Enable or disable a regular port."""
-        if not self.switch_model.MODEL_NAME:
-            self.autodetect_model()
-        if state not in SWITCH_STATES:
-            message = f'State "{state}" not in {SWITCH_STATES}.'
-            raise InvalidSwitchStateError(message)
-        if not self.switch_model.SWITCH_PORT_TEMPLATES:
-            message = "No switch port templates found."
-            raise NotImplementedError(message)
-        if port < 1 or port > self.ports:
-            message = f"Port {port} not in range 1-{self.ports}."
-            raise PortNumberOutofRangeError(message)
+        self._validate_switch_port_request(port, state)
 
         current_info = self.get_switch_infos()
         desc_key = f"port_{port}_description"
@@ -1020,15 +1046,7 @@ class NetgearSwitchConnector:
                     data["FLOW_CONTROL"] = flow
             self._page_fetcher.set_data_from_template(template, self, data)
             _LOGGER.debug("switch_port data=%s", data)
-            response = BaseResponse
-            try:
-                response = self._page_fetcher.request(method, url, data)
-            except NotLoggedInError as error:
-                if self.get_login_cookie():
-                    response = self._page_fetcher.request(method, url, data)
-                else:
-                    message = "Not logged in and unable to login."
-                    raise LoginFailedError(message) from error
+            response = self._request_switch_port_change(method, url, data)
             if (
                 self._page_fetcher.has_ok_status(response)
                 and str(response.content.strip()) == "b'SUCCESS'"
@@ -1039,7 +1057,8 @@ class NetgearSwitchConnector:
                 with suppress(NetgearPlusPageParserError):
                     self._client_hash = self._page_parser.parse_client_hash(response)
                 _LOGGER.info(
-                    "NetgearSwitchConnector.switch_port change accepted, waiting %.1fs for switch to apply it",
+                    "NetgearSwitchConnector.switch_port change accepted, "
+                    "waiting %.1fs for switch to apply it",
                     pending_apply_delay,
                 )
                 time.sleep(pending_apply_delay)
