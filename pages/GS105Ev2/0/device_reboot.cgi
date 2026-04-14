@@ -9,19 +9,19 @@
 <script language="JavaScript">
 function doReload()
 {
-    var url = window.location.href;
-    if (url.indexOf('/device_reboot.cgi') != -1)
-    {
-        top.location.href = url.substring(0, url.lastIndexOf('/device_reboot.cgi'));
-    }
-    else
-    {
-        alert("Refresh to reload.");
-    }
+	var url = window.location.href;
+	if (url.indexOf('/device_reboot.cgi') != -1)
+	{
+		top.location.href = url.substring(0, url.lastIndexOf('/device_reboot.cgi'));
+	}
+	else
+	{
+		alert("Refresh to reload.");
+	}
 }
 function reloadAll()
 {
-        setTimeout("doReload();", 6000);
+		setTimeout("doReload();", 6000);
 }
 </script>
 </head>
@@ -34,9 +34,9 @@ function reloadAll()
 </tr><tr><td class="topTitleBottomBar" colspan='2'></td></tr>
 <tr><td class="paddingsubSectionBodyNone" colspan='2'><table class="tableStyle" style="width:745px;">
  <tr>
-    <td colspan='2'>Check box and click Apply button to reboot switch.
-    <input type="checkbox" name="CBox" id="CBox" alue="0" style="margin-left:25px;" onclick="buttonsChange();" checked>
-    </td>
+	<td colspan='2'>Check box and click Apply button to reboot switch.
+	<input type="checkbox" name="CBox" id="CBox" alue="0" style="margin-left:25px;" onclick="buttonsChange();" checked>
+	</td>
  </tr>
 </table>
  </td>
