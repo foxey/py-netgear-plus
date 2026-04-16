@@ -895,13 +895,13 @@ class NetgearSwitchConnector:
                 else:
                     switch_data[f"port_{port_number}_connection_speed"] = 0
                 if port_status[port_number].get("description") is not None:
-                    switch_data[f"port_{port_number}_description"] = (
-                        port_status[port_number].get("description")
-                    )
+                    switch_data[f"port_{port_number}_description"] = port_status[
+                        port_number
+                    ].get("description")
                 if port_status[port_number].get("flow_control") is not None:
-                    switch_data[f"port_{port_number}_flow_control"] = (
-                        port_status[port_number].get("flow_control")
-                    )
+                    switch_data[f"port_{port_number}_flow_control"] = port_status[
+                        port_number
+                    ].get("flow_control")
             else:
                 message = (
                     f"Number of statusses ({len(port_status)})"

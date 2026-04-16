@@ -164,6 +164,7 @@ class GS105Ev2(AutodetectedSwitchModel):
             "SPEED": 1 if state == "on" else 2,
         }
 
+
 class GS105PE(GS105Ev2):
     """Definition for Netgear GS105PE model. Inherits port switching from GS105Ev2."""
 
