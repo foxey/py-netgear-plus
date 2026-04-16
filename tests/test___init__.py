@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
@@ -34,6 +35,9 @@ from py_netgear_plus.models import (
     JGS524Ev2,
 )
 from py_netgear_plus.netgear_crypt import hex_hmac_md5, merge_hash
+
+if TYPE_CHECKING:
+    from http.cookiejar import Cookie
 
 # List of models with saved pages, extracted rand values and crypted passwords
 MODEL_PARAMETERS = [
@@ -497,6 +501,39 @@ def test_turn_on_and_off_poe_port(switch_model: type[AutodetectedSwitchModel]) -
                     timeout=URL_REQUEST_TIMEOUT,
                     allow_redirects=False,
                 )
+
+
+@pytest.mark.parametrize(
+    ("port_suffix", "expected_cookie_port"),
+    [("", None), (":80", "80"), (":1337", "1337")],
+)
+def test_non_standard_tcp_ports(port_suffix: str, expected_cookie_port: int) -> None:
+    """Test whether cookie port and domain are split correctly."""
+    response = BaseResponse()
+    response.status_code = requests.codes.ok
+    response.content = b"SUCCESS"
+    with patch(
+        "py_netgear_plus.fetcher.requests.request",
+        return_value=response,
+    ) as mock_request:
+        mock_request.return_value = response
+        host_portion = "192.168.0.1"
+        concatenated = f"{host_portion}{port_suffix}"
+
+        connector = NetgearSwitchConnector(host=concatenated, password="password")
+        connector.set_cookie("demo", "demo")
+
+        connector._page_fetcher.request("get", concatenated)
+
+    mock_request.assert_called_once()
+
+    assert "cookies" in mock_request.call_args.kwargs
+    cookies = list(mock_request.call_args.kwargs["cookies"])
+
+    assert len(cookies) == 1
+    only_cookie: Cookie = cookies.pop()
+    assert only_cookie.port == expected_cookie_port
+    assert only_cookie.domain == host_portion
 
 
 @pytest.mark.parametrize(
