@@ -1,6 +1,7 @@
 """Netgear API."""
 
 import logging
+import re
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -22,6 +23,7 @@ from .models import (
     MODELS,
     AutodetectedSwitchModel,
     MultipleModelsDetectedError,
+    PortNumberOutofRangeError,
     SwitchModelNotDetectedError,
 )
 from .parsers import NetgearPlusPageParserError, create_page_parser
@@ -33,6 +35,7 @@ MAX_AUTHENTICATION_FAILURES = 3
 PORT_STATUS_CONNECTED = ["Aktiv", "Up", "UP", "CONNECTED"]
 PORT_MODUS_SPEED = ["Auto"]
 SWITCH_STATES = ["on", "off"]
+FLOW_CONTROL = ["Enable", "Disable"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +43,48 @@ _LOGGER = logging.getLogger(__name__)
 def _from_bytes_to_megabytes(v: float) -> float:
     bytes_to_mbytes = 1e-6
     return float(f"{round(v * bytes_to_mbytes, 2):.2f}")
+
+
+def _normalize_flow_control(value: Any) -> int | None:
+    """Return protocol value for flow control when it can be inferred."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 2
+    if isinstance(value, int):
+        return value if value in (1, 2) else None
+
+    normalized = str(value).strip().lower()
+    flow_control_mapping = {
+        "1": 1,
+        "true": 1,
+        "enable": 1,
+        "enabled": 1,
+        "aktiv": 1,
+        "2": 2,
+        "false": 2,
+        "disable": 2,
+        "disabled": 2,
+        "deaktiviert": 2,
+    }
+    return flow_control_mapping.get(normalized)
+
+
+def _get_pending_apply_delay(response: Response | BaseResponse) -> float | None:
+    """Return wait time if switch accepted a change and asks to wait."""
+    if not getattr(response, "content", None):
+        return None
+
+    content = response.content
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    if b"Please wait..." not in content:
+        return None
+
+    match = re.search(rb'http-equiv="refresh"\s+content\s*=\s*["\']?\s*(\d+)', content)
+    if match:
+        return float(match.group(1))
+    return 4.0
 
 
 class InvalidPortStatusError(Exception):
@@ -395,6 +440,32 @@ class NetgearSwitchConnector:
         if name == "gambitCookie":
             self._gambit = content
         return self._page_fetcher.set_cookie(name, content)
+
+    def _validate_switch_port_request(self, port: int, state: str) -> None:
+        """Validate switch_port inputs and model capabilities."""
+        if not self.switch_model.MODEL_NAME:
+            self.autodetect_model()
+        if state not in SWITCH_STATES:
+            message = f'State "{state}" not in {SWITCH_STATES}.'
+            raise InvalidSwitchStateError(message)
+        if not self.switch_model.SWITCH_PORT_TEMPLATES:
+            message = "No switch port templates found."
+            raise NotImplementedError(message)
+        if port < 1 or port > self.ports:
+            message = f"Port {port} not in range 1-{self.ports}."
+            raise PortNumberOutofRangeError(message)
+
+    def _request_switch_port_change(
+        self, method: str, url: str, data: dict[str, Any]
+    ) -> Response | BaseResponse:
+        """Send a switch_port request, retrying once after login refresh."""
+        try:
+            return self._page_fetcher.request(method, url, data)
+        except NotLoggedInError as error:
+            if self.get_login_cookie():
+                return self._page_fetcher.request(method, url, data)
+            message = "Not logged in and unable to login."
+            raise LoginFailedError(message) from error
 
     def delete_login_cookie(self) -> bool:
         """Logout and delete cookie."""
@@ -823,6 +894,14 @@ class NetgearSwitchConnector:
                     )
                 else:
                     switch_data[f"port_{port_number}_connection_speed"] = 0
+                if port_status[port_number].get("description") is not None:
+                    switch_data[f"port_{port_number}_description"] = port_status[
+                        port_number
+                    ].get("description")
+                if port_status[port_number].get("flow_control") is not None:
+                    switch_data[f"port_{port_number}_flow_control"] = port_status[
+                        port_number
+                    ].get("flow_control")
             else:
                 message = (
                     f"Number of statusses ({len(port_status)})"
@@ -883,15 +962,16 @@ class NetgearSwitchConnector:
         if poe_port in self.poe_ports:
             for template in self.switch_model.SWITCH_POE_PORT_TEMPLATES:
                 url = template["url"].format(ip=self.host)
+                method = template["method"]
                 data = self.switch_model.get_switch_poe_port_data(poe_port, state)  # type: ignore[report-call-issue]
                 self._page_fetcher.set_data_from_template(template, self, data)
                 _LOGGER.debug("switch_poe_port data=%s", data)
                 response = BaseResponse
                 try:
-                    response = self._page_fetcher.request("post", url, data)
+                    response = self._page_fetcher.request(method, url, data)
                 except NotLoggedInError as error:
                     if self.get_login_cookie():
-                        response = self._page_fetcher.request("post", url, data)
+                        response = self._page_fetcher.request(method, url, data)
                     else:
                         message = "Not logged in and unable to login."
                         raise LoginFailedError(message) from error
@@ -945,6 +1025,57 @@ class NetgearSwitchConnector:
                     response.content.strip(),
                 )
         return False
+
+    def switch_port(self, port: int, state: str) -> bool:
+        """Enable or disable a regular port."""
+        self._validate_switch_port_request(port, state)
+
+        current_info = self.get_switch_infos()
+        desc_key = f"port_{port}_description"
+        flow_key = f"port_{port}_flow_control"
+
+        for template in self.switch_model.SWITCH_PORT_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_switch_port_data(port, state)
+            if desc_key in current_info:
+                data["DESCRIPTION"] = current_info[desc_key]
+            if flow_key in current_info:
+                flow = _normalize_flow_control(current_info[flow_key])
+                if flow is not None:
+                    data["FLOW_CONTROL"] = flow
+            self._page_fetcher.set_data_from_template(template, self, data)
+            _LOGGER.debug("switch_port data=%s", data)
+            response = self._request_switch_port_change(method, url, data)
+            if (
+                self._page_fetcher.has_ok_status(response)
+                and str(response.content.strip()) == "b'SUCCESS'"
+            ):
+                return True
+            pending_apply_delay = _get_pending_apply_delay(response)
+            if pending_apply_delay is not None:
+                with suppress(NetgearPlusPageParserError):
+                    self._client_hash = self._page_parser.parse_client_hash(response)
+                _LOGGER.info(
+                    "NetgearSwitchConnector.switch_port change accepted, "
+                    "waiting %.1fs for switch to apply it",
+                    pending_apply_delay,
+                )
+                time.sleep(pending_apply_delay)
+                return True
+            _LOGGER.warning(
+                "NetgearSwitchConnector.switch_port response was %s",
+                response.content.strip(),
+            )
+        return False
+
+    def turn_on_port(self, port: int) -> bool:
+        """Enable a port (Auto)."""
+        return self.switch_port(port, "on")
+
+    def turn_off_port(self, port: int) -> bool:
+        """Disable a port."""
+        return self.switch_port(port, "off")
 
     def save_pages(self, path_prefix: str = "") -> None:
         """Save all pages to files for debugging."""

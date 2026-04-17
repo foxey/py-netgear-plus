@@ -72,6 +72,7 @@ class AutodetectedSwitchModel:
             "params": {"hash": "_client_hash"},
         }
     ]
+    SWITCH_PORT_TEMPLATES: ClassVar = []
     POE_PORT_CONFIG_TEMPLATES: ClassVar = []
     SWITCH_POE_PORT_TEMPLATES: ClassVar = []
     CYCLE_POE_PORT_TEMPLATES: ClassVar = []
@@ -85,6 +86,11 @@ class AutodetectedSwitchModel:
     def get_autodetect_funcs(self) -> list:
         """Return list with detection functions."""
         return self.CHECKS_AND_RESULTS
+
+    def get_switch_port_data(self, port: int, state: str) -> dict:
+        """Return dict with form fields for switching a port (enable/disable)."""
+        del port, state
+        return {}
 
     def get_switch_poe_port_data(self, poe__port: int, state: str) -> dict:
         """Return empty dict. Implement on model level."""
@@ -142,6 +148,13 @@ class GS105Ev2(AutodetectedSwitchModel):
             "url": "http://{ip}/status.cgi",
         }
     ]
+    SWITCH_PORT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/status.cgi",
+            "params": {"hash": "_client_hash"},
+        }
+    ]
     SWITCH_REBOOT_TEMPLATES: ClassVar = [
         {
             "method": "post",
@@ -151,9 +164,16 @@ class GS105Ev2(AutodetectedSwitchModel):
     ]
     LOGOUT_TEMPLATES: ClassVar = [{"method": "get", "url": "http://{ip}/logout.cgi"}]
 
+    def get_switch_port_data(self, port: int, state: str) -> dict:
+        """Build form data for switching port state via SPEED field."""
+        return {
+            f"port{port}": "checked",
+            "SPEED": 1 if state == "on" else 2,
+        }
+
 
 class GS105PE(GS105Ev2):
-    """Definition for Netgear GS105PE model."""
+    """Definition for Netgear GS105PE model. Inherits port switching from GS105Ev2."""
 
     MODEL_NAME = "GS105PE"
     PORTS = 5
