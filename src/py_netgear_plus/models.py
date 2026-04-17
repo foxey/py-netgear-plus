@@ -155,6 +155,13 @@ class GS105Ev2(AutodetectedSwitchModel):
             "params": {"hash": "_client_hash"},
         }
     ]
+    SWITCH_REBOOT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/device_reboot.cgi",
+            "params": {"CBox": "literal:on", "hash": "_client_hash"},
+        }
+    ]
     LOGOUT_TEMPLATES: ClassVar = [{"method": "get", "url": "http://{ip}/logout.cgi"}]
 
     def get_switch_port_data(self, port: int, state: str) -> dict:
@@ -170,6 +177,7 @@ class GS105PE(GS105Ev2):
 
     MODEL_NAME = "GS105PE"
     PORTS = 5
+    SWITCH_REBOOT_TEMPLATES: ClassVar = []
     CHECKS_AND_RESULTS: ClassVar = [
         ("check_login_form_rand", [True]),
         ("parse_login_title_tag", ["GS105PE"]),
