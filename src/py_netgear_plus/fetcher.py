@@ -300,7 +300,7 @@ class PageFetcher:
             script = html.fromstring(response.content).xpath(
                 '//script[contains(text(),"/wmi/login")]'
             )
-            if len(script) > 0 and 'top.location.href = "/wmi/login"' in script[0].text:
+            if len(script) > 0 and script[0].text and 'top.location.href = "/wmi/login"' in script[0].text:
                 _LOGGER.info(
                     "[PageFetcher._is_authenticated] Returning false: script=%s",
                     script[0].text,
