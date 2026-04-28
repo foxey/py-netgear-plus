@@ -86,9 +86,14 @@ Each switch model has its own parser class. If the new model introduces unique p
 ## 4. Add pages responses to the `pages/` folder
 
 The repository contains a collection of page responses used by `pytest` to ensure that no regression problems are introduced during future updates.
-The structure of the collection is as follows: `pages/MODEL_NAME/0` and `pages/MODE_NAME/1`. Add a copy of each first successful retrieval from these templates: `AUTODETECT_TEMPLATES', `LOGIN_TEMPLATE`, `SWITCH_INFO_TEMPLATES`, `PORT_STATUS_TEMPLATES`, and `PORT_STATISTICS_TEMPLATES`to both directories.
+The structure of the collection is as follows: `pages/MODEL_NAME/0` and `pages/MODE_NAME/1`. Add a copy of each first successful retrieval from these templates: `AUTODETECT_TEMPLATES`, `LOGIN_TEMPLATE`, `SWITCH_INFO_TEMPLATES`, `PORT_STATUS_TEMPLATES`, and `PORT_STATISTICS_TEMPLATES`to both directories.
 
 Ensure that the response of the login page is the first one sent (most switches redirect to a dashboard page after the initial response) and that the latter three pages are saved using a valid login session (otherwise the only contain a redirect to the login page). Also ensure that for the page retrieved by`PORT_STATISTICS_TEMPLATES`the copy in the`/1`folder is taken 10-60 seconds after the one in the`/0`. The test suite tests if the calculations for the `traffic_rx`and`traffic_tx` speeds are performed correctly.
+
+The pages can be collected with `ngp-cli`:
+1. Temporarily change the switch password to `Password1`. Crypted Password will be added to unit tests and tests expect `Password1`
+2. login with `ngp-cli --password Password1 login {ip}`
+3. collect pages for unit tests `ngp-cli collect`
 
 ## 5. Test the New Model and Update Unit Tests
 
@@ -99,6 +104,15 @@ Ensure that the response of the login page is the first one sent (most switches 
 5. Add unit tests for the new model in the test suite:
    - Locate the unit test file in `tests/test__init__.py` that contains tests for existing switch models.
    - Add the new model to the `MODEL_PARAMETERS` list with appropriate test values (rand, crypted password, and response content).
+    
+       > example based on GSS108E switch
+       >
+       > `(GSS108E, "2082437949", "1c0714cfd1c8595db5ba36ceae43b134", "<html></html>")`
+       > 
+       > |         | Model name        | rand                               | crypted password                             | response content  |
+       > | --------| ----------------- | ---------------------------------- | -------------------------------------------- | ----------------- |
+       > | example | GSS108E           | 2082437949                         | 1c0714cfd1c8595db5ba36ceae43b134             | \<html\>\</html\> |
+       > | where   | switch model name | hidden input element in login form | POST request body from login form submission | ?                 |
    - If the model lacks complete test data, add it to `MODELS_FOR_GET_SWITCH_INFOS` with an appropriate `pytest.mark.xfail` annotation.
    - Run the test suite with `pytest` to confirm all tests pass, and fix any issues as needed.
 
