@@ -11,7 +11,7 @@ Contributing to this project should be as easy and transparent as possible, whet
 
 The project owner [@foxey](https://github.com/foxey) currently lacks the time to actively review and support this project on a day-to-day basis.
 
-To keep the project moving, review duties have been delegated to **Ada**, an AI assistant powered by [NanoClaw](https://github.com/foxey/nanoclaw). Ada will handle:
+To keep the project moving, review duties have been delegated to **Ada**, an AI assistant powered by [NanoClaw](https://nanoclaw.dev). Ada will handle:
 
 - Reviewing pull requests and posting feedback
 - Triaging issues
