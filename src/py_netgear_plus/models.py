@@ -32,6 +32,7 @@ class AutodetectedSwitchModel:
     POE_MAX_POWER_ALL_PORTS = None
     POE_MAX_POWER_SINGLE_PORT = None
     POE_SCHEDULING = False
+    API_TYPE: ClassVar = ""
     CHECKS_AND_RESULTS: ClassVar = []
 
     AUTODETECT_TEMPLATES: ClassVar = [
@@ -71,6 +72,7 @@ class AutodetectedSwitchModel:
             "params": {"hash": "_client_hash"},
         }
     ]
+    SWITCH_PORT_TEMPLATES: ClassVar = []
     POE_PORT_CONFIG_TEMPLATES: ClassVar = []
     SWITCH_POE_PORT_TEMPLATES: ClassVar = []
     CYCLE_POE_PORT_TEMPLATES: ClassVar = []
@@ -84,6 +86,11 @@ class AutodetectedSwitchModel:
     def get_autodetect_funcs(self) -> list:
         """Return list with detection functions."""
         return self.CHECKS_AND_RESULTS
+
+    def get_switch_port_data(self, port: int, state: str) -> dict:
+        """Return dict with form fields for switching a port (enable/disable)."""
+        del port, state
+        return {}
 
     def get_switch_poe_port_data(self, poe__port: int, state: str) -> dict:
         """Return empty dict. Implement on model level."""
@@ -141,14 +148,36 @@ class GS105Ev2(AutodetectedSwitchModel):
             "url": "http://{ip}/status.cgi",
         }
     ]
+    SWITCH_PORT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/status.cgi",
+            "params": {"hash": "_client_hash"},
+        }
+    ]
+    SWITCH_REBOOT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/device_reboot.cgi",
+            "params": {"CBox": "literal:on", "hash": "_client_hash"},
+        }
+    ]
     LOGOUT_TEMPLATES: ClassVar = [{"method": "get", "url": "http://{ip}/logout.cgi"}]
+
+    def get_switch_port_data(self, port: int, state: str) -> dict:
+        """Build form data for switching port state via SPEED field."""
+        return {
+            f"port{port}": "checked",
+            "SPEED": 1 if state == "on" else 2,
+        }
 
 
 class GS105PE(GS105Ev2):
-    """Definition for Netgear GS105PE model."""
+    """Definition for Netgear GS105PE model. Inherits port switching from GS105Ev2."""
 
     MODEL_NAME = "GS105PE"
     PORTS = 5
+    SWITCH_REBOOT_TEMPLATES: ClassVar = []
     CHECKS_AND_RESULTS: ClassVar = [
         ("check_login_form_rand", [True]),
         ("parse_login_title_tag", ["GS105PE"]),
@@ -592,8 +621,13 @@ class GS316Series(GS30xSeries):
             "params": {"Gambit": "_gambit"},
         }
     ]
-
-    SWITCH_REBOOT_TEMPLATES: ClassVar = []
+    SWITCH_REBOOT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/iss/specific/sys_reload.html",
+            "params": {"Gambit": "_gambit", "ACTION": "literal:Reload"},
+        }
+    ]
 
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""
@@ -644,7 +678,7 @@ class GS316EPP(GS316EP):
     """Definition for Netgear GS316EPP model."""
 
     MODEL_NAME = "GS316EPP"
-    POE_POWER_ALL_PORTS = 231
+    POE_MAX_POWER_ALL_PORTS = 231
     CHECKS_AND_RESULTS: ClassVar = [
         ("check_login_form_rand", [True]),
         ("parse_login_title_tag", ["GS316EPP"]),
@@ -716,6 +750,85 @@ class GS116Ev2(JGSxxxSeries):
         ("check_login_form_rand", [False]),
         ("parse_first_script_tag", ["GS116Ev2"]),
     ]
+
+
+class GSS108E(AutodetectedSwitchModel):
+    """Definition for Netgear GSS108E model."""
+
+    MODEL_NAME = "GSS108E"
+    PORTS = 8
+    POE_PORTS: ClassVar = []
+    ALLOWED_COOKIE_TYPES: ClassVar = ["SID"]
+
+    CHECKS_AND_RESULTS: ClassVar = [
+        ("check_login_form_rand", [True]),
+        ("parse_login_title_tag", ["GSS108E"]),
+    ]
+
+    # Mandatory request templates for interacting with the switch
+    LOGIN_TEMPLATE: ClassVar = {
+        "method": "post",
+        "url": "http://{ip}/login.cgi",
+        "params": {"password": "_password_hash"},
+    }
+
+    SWITCH_INFO_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/switch_info.cgi"},
+    ]
+
+    PORT_STATUS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/status.cgi"},
+    ]
+
+    PORT_STATISTICS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/portStatistics.cgi"},
+    ]
+
+    LOGOUT_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/logout.cgi"},
+    ]
+
+
+class MS3xxSeries(AutodetectedSwitchModel):
+    """Parent class definition for Netgear MS3xx series (JSON REST API)."""
+
+    API_TYPE: ClassVar = "json_rest"
+    CHECKS_AND_RESULTS: ClassVar = []
+    AUTODETECT_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/system/status"},
+    ]
+    LOGIN_TEMPLATE: ClassVar = {
+        "method": "patch",
+        "url": "http://{ip}/api/system/login",
+    }
+    LOGIN_SESSION_TEMPLATE: ClassVar = {
+        "method": "post",
+        "url": "http://{ip}/api/login_session",
+    }
+    SWITCH_INFO_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/system/status"},
+    ]
+    PORT_STATUS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/ports"},
+    ]
+    PORT_STATISTICS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/api/ports/statistics"},
+    ]
+    LOGOUT_TEMPLATES: ClassVar = []
+
+
+class MS305E(MS3xxSeries):
+    """Definition for Netgear MS305E model."""
+
+    MODEL_NAME = "MS305E"
+    PORTS = 5
+
+
+class MS308E(MS3xxSeries):
+    """Definition for Netgear MS308E model."""
+
+    MODEL_NAME = "MS308E"
+    PORTS = 8
 
 
 MODELS = get_all_child_classes_list(AutodetectedSwitchModel, "MODEL_NAME")

@@ -1,5 +1,6 @@
 """Definitions of html parsers for Netgear Plus switches."""
 
+import json
 import logging
 import re
 from typing import Any
@@ -405,15 +406,21 @@ class GS105Ev2(PageParser):
         portstatus_elems = tree.xpath('//tr[@class="portID"]/td[4]')
         portspeed_elems = tree.xpath('//tr[@class="portID"]/td[5]')
         portconnectionspeed_elems = tree.xpath('//tr[@class="portID"]/td[6]')
+        portflowcontrol_elems = tree.xpath('//tr[@class="portID"]/td[7]')
 
         for port_nr in range(ports):
             try:
+                description_text = _port_elems[port_nr].text or ""
                 status_text = portstatus_elems[port_nr].text.strip()
                 modus_speed_text = portspeed_elems[port_nr].text.strip()
                 connection_speed_text = strip_duplex(
                     portconnectionspeed_elems[port_nr].text
                 )
+                flow_control_text = portflowcontrol_elems[port_nr].text.strip()
             except (IndexError, AttributeError):
+                description_text = self.port_status.get(port_nr + 1, {}).get(
+                    "description", None
+                )
                 status_text = self.port_status.get(port_nr + 1, {}).get("status", None)
                 modus_speed_text = self.port_status.get(port_nr + 1, {}).get(
                     "modus_speed", None
@@ -421,10 +428,15 @@ class GS105Ev2(PageParser):
                 connection_speed_text = self.port_status.get(port_nr + 1, {}).get(
                     "connection_speed", None
                 )
+                flow_control_text = self.port_status.get(port_nr + 1, {}).get(
+                    "flow_control", None
+                )
             status_by_port[port_nr + 1] = {
+                "description": description_text,
                 "status": status_text,
                 "modus_speed": modus_speed_text,
                 "connection_speed": connection_speed_text,
+                "flow_control": flow_control_text,
             }
 
         self.port_status = status_by_port
@@ -569,9 +581,9 @@ class GS108Ev4(PageParser):
                     './/span[contains(@class, "padding_r_18")]/span/text()'
                 )[0]
                 speed = blocks[port_nr].xpath('.//input[@class="Speed"]/@value')[0]
-                connection_speed_text = blocks[port_nr].xpath(
-                    './/input[@class="LinkedSpeed"]/@value'
-                )[0]
+                connection_speed_text = strip_duplex(
+                    blocks[port_nr].xpath('.//input[@class="LinkedSpeed"]/@value')[0]
+                )
                 modus_speed_text = [
                     "0",
                     "Auto",
@@ -1285,6 +1297,218 @@ class GS116Ev2(JGSxxxSeries):
 
     def __init__(self) -> None:
         """Initialize the GS116Ev2 parser."""
+        super().__init__()
+
+
+class GSS108E(PageParser):
+    """Parser for the GSS108E switch."""
+
+    def __init__(self) -> None:
+        """Initialize the GSS108E parser."""
+        super().__init__()
+
+    def parse_switch_metadata(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse switch info from the html page."""
+        tree = html.fromstring(page.content)
+
+        switch_name = get_first_value(tree, '//input[@id="switch_name"]')
+        switch_serial_number = get_first_text(tree, '//table[@id="tbl2"]/tr[3]/td[2]')
+
+        self._switch_firmware = get_first_text(tree, '//table[@id="tbl2"]/tr[5]/td[2]')
+
+        self._switch_bootloader = "unknown"
+
+        return {
+            "switch_name": switch_name,
+            "switch_serial_number": switch_serial_number,
+            "switch_bootloader": self._switch_bootloader,
+            "switch_firmware": self._switch_firmware,
+        }
+
+    def parse_port_status(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[int, dict[str, Any]]:
+        """Parse port status from the html page."""
+        status_by_port = {}
+
+        tree = html.fromstring(page.content)
+        _port_elems = tree.xpath('//tr[@class="portID"]/td[3]')
+        portstatus_elems = tree.xpath('//tr[@class="portID"]/td[4]')
+        portspeed_elems = tree.xpath('//tr[@class="portID"]/td[5]')
+        portconnectionspeed_elems = tree.xpath('//tr[@class="portID"]/td[6]')
+        # Firmware Version V1.6.0.9
+        # localisation mappings from javascript object "lang" in the page source
+        # and developer console, e.g. lang["ss022"] = "Up"
+        for port_nr in range(ports):
+            # Port Status - column 4
+            try:
+                portstatus_text = portstatus_elems[port_nr].text.strip()
+                match portstatus_text:
+                    # Up
+                    case "ss022":
+                        status_text = "Up"
+                    # Down
+                    case "ss023":
+                        status_text = "Down"
+                    case _:
+                        raise NetgearPlusPageParserError(
+                            "unmapped localisation string: " + portstatus_text
+                        )
+            except (IndexError, AttributeError):
+                status_text = ""
+            # Speed - column 5
+            try:
+                portspeed_text = portspeed_elems[port_nr].text.strip()
+                match portspeed_text:
+                    # Auto
+                    case "ss024":
+                        modus_speed_text = "Auto"
+                    # Disable
+                    case "ss013":
+                        modus_speed_text = "Disable"
+                    case _:
+                        modus_speed_text = portspeed_elems[port_nr].text.strip()
+            except (IndexError, AttributeError):
+                modus_speed_text = ""
+            # Linked Speed - column 6
+            try:
+                portconnectionspeed_text = portconnectionspeed_elems[port_nr].text
+                match portconnectionspeed_text.strip():
+                    # No Speed
+                    case "ss027":
+                        connection_speed_text = "No Speed"
+                    case _:
+                        connection_speed_text = strip_duplex(
+                            portconnectionspeed_text
+                        ).strip()
+            except (IndexError, AttributeError):
+                connection_speed_text = ""
+            status_by_port[port_nr + 1] = {
+                "status": status_text,
+                "modus_speed": modus_speed_text,
+                "connection_speed": connection_speed_text,
+            }
+        self.port_status = status_by_port
+        _LOGGER.debug("Port Status is %s", self.port_status)
+        return status_by_port
+
+    def parse_error(self, page: Response | BaseResponse) -> str | None:
+        """Parse error from the html page."""
+        tree = html.fromstring(page.content)
+        error_msg = tree.xpath('//div[@id="pwdErr"]')
+        if error_msg:
+            return error_msg[0].text
+        return None
+
+
+class MS3xxSeries(PageParser):
+    """Parser for MS3xx series switches (JSON REST API)."""
+
+    def __init__(self) -> None:
+        """Initialize the MS3xx series parser."""
+        super().__init__()
+
+    def parse_switch_metadata(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse switch info from the JSON API response."""
+        data = json.loads(page.content)
+        system_info = data.get("systemInfo", {})
+        self._switch_firmware = system_info.get("firmwareVersion", "")
+        self._switch_bootloader = ""
+        return {
+            "switch_name": system_info.get("switchName", ""),
+            "switch_serial_number": system_info.get("serialNumber", ""),
+            "switch_bootloader": self._switch_bootloader,
+            "switch_firmware": self._switch_firmware,
+        }
+
+    def parse_port_status(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[int, dict[str, Any]]:
+        """Parse port status from the JSON API response."""
+        del ports
+        data = json.loads(page.content)
+        status_by_port: dict[int, dict[str, Any]] = {}
+        for port_conf in data.get("portConfs", []):
+            port_no = int(port_conf["portNo"])
+            link_speed = str(port_conf.get("linkSpeed", ""))
+            # Strip duplex suffix (e.g. "100M_F" -> "100M")
+            connection_speed = re.sub(r"_[FH]$", "", link_speed)
+            is_connected = bool(link_speed) and link_speed.lower() not in (
+                "down",
+                "disabled",
+            )
+            status_by_port[port_no] = {
+                "status": "Up" if is_connected else "Down",
+                "modus_speed": str(port_conf.get("linkSpeedConf", "")),
+                "connection_speed": connection_speed,
+            }
+        self.port_status = status_by_port
+        return status_by_port
+
+    def parse_port_statistics(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[str, Any]:
+        """Parse port statistics from the JSON API response."""
+        data = json.loads(page.content)
+        rx = []
+        tx = []
+        crc = []
+        for port_stat in data.get("portStatistics", []):
+            rx.append(int(port_stat.get("bytesRecv", 0)))
+            tx.append(int(port_stat.get("bytesSend", 0)))
+            crc.append(int(port_stat.get("crcPackets", 0)))
+        # Pad to expected number of ports in case the API returns fewer
+        # entries than the model's port count (e.g. ports not yet initialised).
+        while len(rx) < ports:
+            rx.append(0)
+            tx.append(0)
+            crc.append(0)
+        # The JSON API only provides cumulative byte counts, not real-time
+        # speed, so speed_io is always zero. The caller computes speed from
+        # the delta between consecutive cumulative readings.
+        io_zeros = [0] * ports
+        return {
+            "traffic_rx": rx,
+            "traffic_tx": tx,
+            "sum_rx": rx,
+            "sum_tx": tx,
+            "crc_errors": crc,
+            "speed_io": io_zeros,
+        }
+
+    def parse_client_hash(self, page: Response | BaseResponse) -> str | None:
+        """No client hash for JSON REST API switches."""
+        del page
+        return None
+
+    def parse_error(self, page: Response | BaseResponse) -> str | None:
+        """Parse error from the JSON API response."""
+        try:
+            data = json.loads(page.content)
+            if data.get("errCode", 0) != 0:
+                return data.get("message", "Unknown error")
+        except (ValueError, AttributeError):
+            pass
+        return None
+
+    def has_api_v2(self) -> bool:
+        """JSON REST API switches do not use the v2 HTML API."""
+        return False
+
+
+class MS305E(MS3xxSeries):
+    """Parser for the MS305E switch."""
+
+    def __init__(self) -> None:
+        """Initialize the MS305E parser."""
+        super().__init__()
+
+
+class MS308E(MS3xxSeries):
+    """Parser for the MS308E switch."""
+
+    def __init__(self) -> None:
+        """Initialize the MS308E parser."""
         super().__init__()
 
 

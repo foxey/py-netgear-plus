@@ -1,6 +1,7 @@
 """Netgear API."""
 
 import logging
+import re
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -22,17 +23,19 @@ from .models import (
     MODELS,
     AutodetectedSwitchModel,
     MultipleModelsDetectedError,
+    PortNumberOutofRangeError,
     SwitchModelNotDetectedError,
 )
 from .parsers import NetgearPlusPageParserError, create_page_parser
 
-__version__ = "0.4.7"
+__version__ = "0.6.3"
 
 DEFAULT_PAGE = "index.htm"
 MAX_AUTHENTICATION_FAILURES = 3
 PORT_STATUS_CONNECTED = ["Aktiv", "Up", "UP", "CONNECTED"]
 PORT_MODUS_SPEED = ["Auto"]
 SWITCH_STATES = ["on", "off"]
+FLOW_CONTROL = ["Enable", "Disable"]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +43,48 @@ _LOGGER = logging.getLogger(__name__)
 def _from_bytes_to_megabytes(v: float) -> float:
     bytes_to_mbytes = 1e-6
     return float(f"{round(v * bytes_to_mbytes, 2):.2f}")
+
+
+def _normalize_flow_control(value: Any) -> int | None:
+    """Return protocol value for flow control when it can be inferred."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 2
+    if isinstance(value, int):
+        return value if value in (1, 2) else None
+
+    normalized = str(value).strip().lower()
+    flow_control_mapping = {
+        "1": 1,
+        "true": 1,
+        "enable": 1,
+        "enabled": 1,
+        "aktiv": 1,
+        "2": 2,
+        "false": 2,
+        "disable": 2,
+        "disabled": 2,
+        "deaktiviert": 2,
+    }
+    return flow_control_mapping.get(normalized)
+
+
+def _get_pending_apply_delay(response: Response | BaseResponse) -> float | None:
+    """Return wait time if switch accepted a change and asks to wait."""
+    if not getattr(response, "content", None):
+        return None
+
+    content = response.content
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    if b"Please wait..." not in content:
+        return None
+
+    match = re.search(rb'http-equiv="refresh"\s+content\s*=\s*["\']?\s*(\d+)', content)
+    if match:
+        return float(match.group(1))
+    return 4.0
 
 
 class InvalidPortStatusError(Exception):
@@ -111,11 +156,107 @@ class NetgearSwitchConnector:
         """Get offline mode status."""
         return self._page_fetcher.offline_mode
 
+    @property
+    def _is_json_api(self) -> bool:
+        """Return True if switch uses JSON REST API."""
+        return getattr(self.switch_model, "API_TYPE", "") == "json_rest"
+
+    def _json_api_login(self) -> bool:
+        """Login via JSON REST API (MS-series switches)."""
+        login_template = self.switch_model.LOGIN_TEMPLATE
+        login_url = login_template["url"].format(ip=self.host)
+        login_method = login_template["method"]
+        session_template = self.switch_model.LOGIN_SESSION_TEMPLATE
+        session_url = session_template["url"].format(ip=self.host)
+        session_method = session_template["method"]
+        try:
+            response = self._page_fetcher.json_request(
+                login_method,
+                login_url,
+                data={"password": self._password},
+            )
+            if not self._page_fetcher.has_ok_status(response):
+                return False
+            data = response.json()
+            if data.get("errCode") != 0:
+                return False
+            token = data.get("token")
+            session_id = data.get("id")
+            if not token or not session_id:
+                return False
+            self._page_fetcher.set_bearer_token(token)
+            response2 = self._page_fetcher.json_request(
+                session_method,
+                session_url,
+                data={"id": session_id, "status": True},
+            )
+            if not self._page_fetcher.has_ok_status(response2):
+                self._page_fetcher.clear_bearer_token()
+                return False
+        except (PageFetcherConnectionError, ValueError, KeyError):
+            return False
+        _LOGGER.info(
+            "[NetgearSwitchConnector._json_api_login] "
+            "JSON REST API login successful for IP=%s",
+            self.host,
+        )
+        return True
+
+    def _json_api_fetch(self, templates: list) -> Response | BaseResponse:
+        """Fetch a JSON REST API endpoint with retry on auth failure."""
+        for template in templates:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            response = self._page_fetcher.json_request(method, url)
+            if (
+                response.status_code == status_code_unauthorized
+                and self._json_api_login()
+            ):
+                response = self._page_fetcher.json_request(method, url)
+            if self._page_fetcher.has_ok_status(response):
+                return response
+        message = f"Failed to load any JSON API endpoint: {templates}"
+        raise PageNotLoadedError(message)
+
+    def _autodetect_json_api(self) -> type[AutodetectedSwitchModel] | None:
+        """Try to detect switch model via JSON REST API."""
+        json_api_models = [
+            m for m in MODELS if getattr(m, "API_TYPE", "") == "json_rest"
+        ]
+        for mdl_cls in json_api_models:
+            mdl = mdl_cls()
+            # Temporarily set model so login templates are available
+            self._set_instance_attributes_by_model(mdl)
+            with suppress(PageFetcherConnectionError, PageNotLoadedError):
+                response = self._json_api_fetch(mdl.AUTODETECT_TEMPLATES)
+                try:
+                    data = response.json()
+                    model_number = data.get("systemInfo", {}).get("modelNumber", "")
+                    if model_number == mdl.MODEL_NAME:
+                        self._page_parser = create_page_parser(
+                            self.switch_model.MODEL_NAME
+                        )
+                        return self.switch_model
+                except (ValueError, KeyError):
+                    pass
+        self.switch_model = AutodetectedSwitchModel
+        return None
+
     def autodetect_model(self) -> type[AutodetectedSwitchModel]:
         """Detect switch model from login page contents."""
         _LOGGER.debug(
             "[NetgearSwitchConnector.autodetect_model] called for IP=%s", self.host
         )
+        # Try JSON REST API detection (MS-series switches)
+        json_api_model = self._autodetect_json_api()
+        if json_api_model:
+            _LOGGER.info(
+                "[NetgearSwitchConnector.autodetect_model] "
+                "found %s switch via JSON REST API.",
+                json_api_model.MODEL_NAME,
+            )
+            return json_api_model
+
         for template in AutodetectedSwitchModel.AUTODETECT_TEMPLATES:
             response = None
             url = template["url"].format(ip=self.host)
@@ -131,6 +272,8 @@ class NetgearSwitchConnector:
                 matched_models = []
                 for mdl_cls in MODELS:
                     mdl = mdl_cls()
+                    if getattr(mdl, "API_TYPE", "") == "json_rest":
+                        continue
                     mdl_name = mdl.MODEL_NAME
                     passed_checks_by_model[mdl_name] = {}
                     autodetect_funcs = mdl.get_autodetect_funcs()
@@ -239,6 +382,10 @@ class NetgearSwitchConnector:
         """Login and save returned cookie."""
         if not self.switch_model or self.switch_model.MODEL_NAME == "":
             self.autodetect_model()
+        if self._is_json_api:
+            if self._page_fetcher.has_bearer_token():
+                return True
+            return self._json_api_login()
         if not self._page_fetcher.get_login_page_response():
             self._page_fetcher.check_login_url(self.switch_model)
         rand = self._page_parser.parse_login_form_rand(
@@ -294,11 +441,40 @@ class NetgearSwitchConnector:
             self._gambit = content
         return self._page_fetcher.set_cookie(name, content)
 
+    def _validate_switch_port_request(self, port: int, state: str) -> None:
+        """Validate switch_port inputs and model capabilities."""
+        if not self.switch_model.MODEL_NAME:
+            self.autodetect_model()
+        if state not in SWITCH_STATES:
+            message = f'State "{state}" not in {SWITCH_STATES}.'
+            raise InvalidSwitchStateError(message)
+        if not self.switch_model.SWITCH_PORT_TEMPLATES:
+            message = "No switch port templates found."
+            raise NotImplementedError(message)
+        if port < 1 or port > self.ports:
+            message = f"Port {port} not in range 1-{self.ports}."
+            raise PortNumberOutofRangeError(message)
+
+    def _request_switch_port_change(
+        self, method: str, url: str, data: dict[str, Any]
+    ) -> Response | BaseResponse:
+        """Send a switch_port request, retrying once after login refresh."""
+        try:
+            return self._page_fetcher.request(method, url, data)
+        except NotLoggedInError as error:
+            if self.get_login_cookie():
+                return self._page_fetcher.request(method, url, data)
+            message = "Not logged in and unable to login."
+            raise LoginFailedError(message) from error
+
     def delete_login_cookie(self) -> bool:
         """Logout and delete cookie."""
         """Only used while testing. Prevents "Maximum number of sessions" error."""
         if not self.switch_model or self.switch_model.MODEL_NAME == "":
             self.autodetect_model()
+        if self._is_json_api:
+            self._page_fetcher.clear_bearer_token()
+            return True
         response = BaseResponse()
         for template in self.switch_model.LOGOUT_TEMPLATES:
             url = template["url"].format(ip=self.host)
@@ -453,14 +629,19 @@ class NetgearSwitchConnector:
     def _get_switch_metadata(self) -> None:
         if not self.switch_model:
             self.autodetect_model()
-        page = self.fetch_page_from_templates(self.switch_model.SWITCH_INFO_TEMPLATES)
+        if self._is_json_api:
+            page = self._json_api_fetch(self.switch_model.SWITCH_INFO_TEMPLATES)
+        else:
+            page = self.fetch_page_from_templates(
+                self.switch_model.SWITCH_INFO_TEMPLATES
+            )
         if not page.content:
             return
         switch_metadata = {"switch_ip": self.host}
-        self._client_hash = self._page_parser.parse_client_hash(page)
-
-        if self.switch_model.SWITCH_LED_TEMPLATES:
-            switch_metadata.update(self._page_parser.parse_led_status(page))
+        if not self._is_json_api:
+            self._client_hash = self._page_parser.parse_client_hash(page)
+            if self.switch_model.SWITCH_LED_TEMPLATES:
+                switch_metadata.update(self._page_parser.parse_led_status(page))
 
         # Avoid a second call on next get_switch_infos() call
         self._loaded_switch_metadata = (
@@ -468,9 +649,12 @@ class NetgearSwitchConnector:
         )
 
     def _get_port_statistics(self) -> dict[str, Any]:
-        response = self.fetch_page_from_templates(
-            self.switch_model.PORT_STATISTICS_TEMPLATES
-        )
+        if self._is_json_api:
+            response = self._json_api_fetch(self.switch_model.PORT_STATISTICS_TEMPLATES)
+        else:
+            response = self.fetch_page_from_templates(
+                self.switch_model.PORT_STATISTICS_TEMPLATES
+            )
         return self._page_parser.parse_port_statistics(response, self.ports)
 
     def _initialize_current_data(self) -> dict:
@@ -670,9 +854,14 @@ class NetgearSwitchConnector:
 
     def _get_port_status(self) -> dict:
         switch_data = {}
-        response_portstatus = self.fetch_page_from_templates(
-            self.switch_model.PORT_STATUS_TEMPLATES
-        )
+        if self._is_json_api:
+            response_portstatus = self._json_api_fetch(
+                self.switch_model.PORT_STATUS_TEMPLATES
+            )
+        else:
+            response_portstatus = self.fetch_page_from_templates(
+                self.switch_model.PORT_STATUS_TEMPLATES
+            )
         port_status = self._page_parser.parse_port_status(
             response_portstatus, self.ports
         )
@@ -705,6 +894,14 @@ class NetgearSwitchConnector:
                     )
                 else:
                     switch_data[f"port_{port_number}_connection_speed"] = 0
+                if port_status[port_number].get("description") is not None:
+                    switch_data[f"port_{port_number}_description"] = port_status[
+                        port_number
+                    ].get("description")
+                if port_status[port_number].get("flow_control") is not None:
+                    switch_data[f"port_{port_number}_flow_control"] = port_status[
+                        port_number
+                    ].get("flow_control")
             else:
                 message = (
                     f"Number of statusses ({len(port_status)})"
@@ -765,15 +962,16 @@ class NetgearSwitchConnector:
         if poe_port in self.poe_ports:
             for template in self.switch_model.SWITCH_POE_PORT_TEMPLATES:
                 url = template["url"].format(ip=self.host)
+                method = template["method"]
                 data = self.switch_model.get_switch_poe_port_data(poe_port, state)  # type: ignore[report-call-issue]
                 self._page_fetcher.set_data_from_template(template, self, data)
                 _LOGGER.debug("switch_poe_port data=%s", data)
                 response = BaseResponse
                 try:
-                    response = self._page_fetcher.request("post", url, data)
+                    response = self._page_fetcher.request(method, url, data)
                 except NotLoggedInError as error:
                     if self.get_login_cookie():
-                        response = self._page_fetcher.request("post", url, data)
+                        response = self._page_fetcher.request(method, url, data)
                     else:
                         message = "Not logged in and unable to login."
                         raise LoginFailedError(message) from error
@@ -827,6 +1025,57 @@ class NetgearSwitchConnector:
                     response.content.strip(),
                 )
         return False
+
+    def switch_port(self, port: int, state: str) -> bool:
+        """Enable or disable a regular port."""
+        self._validate_switch_port_request(port, state)
+
+        current_info = self.get_switch_infos()
+        desc_key = f"port_{port}_description"
+        flow_key = f"port_{port}_flow_control"
+
+        for template in self.switch_model.SWITCH_PORT_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_switch_port_data(port, state)
+            if desc_key in current_info:
+                data["DESCRIPTION"] = current_info[desc_key]
+            if flow_key in current_info:
+                flow = _normalize_flow_control(current_info[flow_key])
+                if flow is not None:
+                    data["FLOW_CONTROL"] = flow
+            self._page_fetcher.set_data_from_template(template, self, data)
+            _LOGGER.debug("switch_port data=%s", data)
+            response = self._request_switch_port_change(method, url, data)
+            if (
+                self._page_fetcher.has_ok_status(response)
+                and str(response.content.strip()) == "b'SUCCESS'"
+            ):
+                return True
+            pending_apply_delay = _get_pending_apply_delay(response)
+            if pending_apply_delay is not None:
+                with suppress(NetgearPlusPageParserError):
+                    self._client_hash = self._page_parser.parse_client_hash(response)
+                _LOGGER.info(
+                    "NetgearSwitchConnector.switch_port change accepted, "
+                    "waiting %.1fs for switch to apply it",
+                    pending_apply_delay,
+                )
+                time.sleep(pending_apply_delay)
+                return True
+            _LOGGER.warning(
+                "NetgearSwitchConnector.switch_port response was %s",
+                response.content.strip(),
+            )
+        return False
+
+    def turn_on_port(self, port: int) -> bool:
+        """Enable a port (Auto)."""
+        return self.switch_port(port, "on")
+
+    def turn_off_port(self, port: int) -> bool:
+        """Disable a port."""
+        return self.switch_port(port, "off")
 
     def save_pages(self, path_prefix: str = "") -> None:
         """Save all pages to files for debugging."""

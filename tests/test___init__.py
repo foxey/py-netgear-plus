@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
@@ -21,7 +22,10 @@ from py_netgear_plus.models import (
     GS308EP,
     GS308EPP,
     GS316EPP,
+    GSS108E,
     JGS516PE,
+    MS305E,
+    MS308E,
     XS512EM,
     AutodetectedSwitchModel,
     GS105Ev2,
@@ -32,6 +36,9 @@ from py_netgear_plus.models import (
     JGS524Ev2,
 )
 from py_netgear_plus.netgear_crypt import hex_hmac_md5, merge_hash
+
+if TYPE_CHECKING:
+    from http.cookiejar import Cookie
 
 # List of models with saved pages, extracted rand values and crypted passwords
 MODEL_PARAMETERS = [
@@ -80,6 +87,7 @@ MODEL_PARAMETERS = [
         "6ca0965e7a44ee17eec5d575c8c56dd8",
         '<html><input name="Gambit" value="cookie_value"></html>',
     ),
+    (GSS108E, "2082437949", "1c0714cfd1c8595db5ba36ceae43b134", "<html></html>"),
 ]
 # Add models without a full set of pages with pytest.param(GSXYZ,
 #   marks=pytest.mark.xfail(reason="no valid data pages"))
@@ -99,11 +107,13 @@ MODELS_FOR_GET_SWITCH_INFOS = [
     JGS516PE,
     JGS524Ev2,
     XS512EM,
+    GSS108E,
 ]
 
 # List of models for reboot test, with
 # reboot response code and if page content is returned
 MODELS_FOR_REBOOT = [
+    (GS105Ev2, 200, True),
     (GS108Ev3, 200, True),
     (GS308Ev4, 444, False),
     (GS308EP, 444, False),
@@ -111,6 +121,9 @@ MODELS_FOR_REBOOT = [
 ]
 
 TEST_MODELS = [model[0] for model in MODEL_PARAMETERS]
+PORT_SWITCH_MODELS = [
+    switch_model for switch_model in TEST_MODELS if switch_model.SWITCH_PORT_TEMPLATES
+]
 
 
 class PyTestPageFetcher:
@@ -428,6 +441,213 @@ def test_get_switch_infos(switch_model: type[AutodetectedSwitchModel]) -> None:
 
 @pytest.mark.parametrize(
     "switch_model",
+    PORT_SWITCH_MODELS,
+)
+def test_turn_on_and_off_port(switch_model: type[AutodetectedSwitchModel]) -> None:
+    """Test turning on/off a regular port."""
+    with (
+        patch(
+            "py_netgear_plus.NetgearSwitchConnector.fetch_page_from_templates"
+        ) as mock_fetch_page_from_templates,
+    ):
+        page_fetcher = PyTestPageFetcher(switch_model)
+        mock_fetch_page_from_templates.side_effect = page_fetcher.from_file
+
+        connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+
+        with patch("py_netgear_plus.fetcher.requests.request") as mock_request:
+            mock_response = Mock()
+            with page_fetcher.get_path(
+                switch_model.AUTODETECT_TEMPLATES
+            ).open() as file:
+                mock_response.content = file.read()
+            mock_response.status_code = requests.codes.ok
+            mock_request.return_value = mock_response
+            connector.autodetect_model()
+        assert isinstance(connector.switch_model, switch_model)
+
+        connector._client_hash = "client_hash"
+        connector._gambit = "gambit"
+        connector.set_cookie("cookie_name", "cookie_value")
+
+        response = Mock()
+        response.status_code = requests.codes.ok
+        response.content = b"SUCCESS"
+        with patch(
+            "py_netgear_plus.fetcher.requests.request",
+            return_value=response,
+        ) as mock_request:
+            cookies = requests.cookies.RequestsCookieJar()
+            cookies.set(
+                str(connector.get_cookie()[0]),
+                str(connector.get_cookie()[1]),
+                domain=connector.host,
+                path="/",
+            )
+
+            mock_request.return_value = response
+
+            for state in ["on", "off"]:
+                port = 1
+                data = connector.switch_model.get_switch_port_data(port, state)
+                # Mocking get_switch_infos because switch_port calls it
+                with patch(
+                    "py_netgear_plus.NetgearSwitchConnector.get_switch_infos",
+                    return_value={
+                        f"port_{port}_description": "Test",
+                        f"port_{port}_flow_control": "enable",
+                    },
+                ):
+                    assert connector.switch_port(port, state) is True
+                    if state == "on":
+                        assert connector.turn_on_port(port) is True
+                    else:
+                        assert connector.turn_off_port(port) is True
+
+                mock_request.assert_called()
+                # data will be updated by set_data_from_template inside switch_port
+                # but we can check if it was called with correct url and method
+                expected_data = data.copy()
+                expected_data["DESCRIPTION"] = "Test"
+                expected_data["FLOW_CONTROL"] = 1
+                if connector._client_hash:
+                    expected_data["hash"] = connector._client_hash
+                mock_request.assert_called_with(
+                    connector.switch_model.SWITCH_PORT_TEMPLATES[0]["method"],
+                    connector.switch_model.SWITCH_PORT_TEMPLATES[0]["url"].format(
+                        ip=connector.host
+                    ),
+                    data=expected_data,
+                    cookies=cookies,
+                    timeout=URL_REQUEST_TIMEOUT,
+                    allow_redirects=False,
+                )
+
+
+@pytest.mark.parametrize(
+    "switch_model",
+    PORT_SWITCH_MODELS,
+)
+def test_switch_port_uses_model_defaults_when_optional_fields_missing(
+    switch_model: type[AutodetectedSwitchModel],
+) -> None:
+    """Test switching a port without description/flow-control data."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector._set_instance_attributes_by_model(switch_model())
+    connector._client_hash = "client_hash"
+    connector.set_cookie("cookie_name", "cookie_value")
+
+    response = Mock()
+    response.status_code = requests.codes.ok
+    response.content = b"SUCCESS"
+    with patch(
+        "py_netgear_plus.fetcher.requests.request",
+        return_value=response,
+    ) as mock_request:
+        cookies = requests.cookies.RequestsCookieJar()
+        cookies.set(
+            str(connector.get_cookie()[0]),
+            str(connector.get_cookie()[1]),
+            domain=connector.host,
+            path="/",
+        )
+
+        port = 1
+        with patch(
+            "py_netgear_plus.NetgearSwitchConnector.get_switch_infos",
+            return_value={},
+        ):
+            assert connector.switch_port(port, "off") is True
+
+        expected_data = connector.switch_model.get_switch_port_data(port, "off").copy()
+        expected_data["hash"] = connector._client_hash
+        mock_request.assert_called_with(
+            connector.switch_model.SWITCH_PORT_TEMPLATES[0]["method"],
+            connector.switch_model.SWITCH_PORT_TEMPLATES[0]["url"].format(
+                ip=connector.host
+            ),
+            data=expected_data,
+            cookies=cookies,
+            timeout=URL_REQUEST_TIMEOUT,
+            allow_redirects=False,
+        )
+
+
+@pytest.mark.parametrize(
+    "switch_model",
+    PORT_SWITCH_MODELS,
+)
+def test_switch_port_autodetects_before_validating_port_range(
+    switch_model: type[AutodetectedSwitchModel],
+) -> None:
+    """Test switch_port performs lazy autodetection."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+
+    def _autodetect() -> type[AutodetectedSwitchModel]:
+        connector._set_instance_attributes_by_model(switch_model())
+        return switch_model
+
+    with patch.object(connector, "autodetect_model", side_effect=_autodetect):
+        connector._client_hash = "client_hash"
+        connector.set_cookie("cookie_name", "cookie_value")
+
+        response = Mock()
+        response.status_code = requests.codes.ok
+        response.content = b"SUCCESS"
+        with (
+            patch(
+                "py_netgear_plus.fetcher.requests.request",
+                return_value=response,
+            ),
+            patch(
+                "py_netgear_plus.NetgearSwitchConnector.get_switch_infos",
+                return_value={},
+            ),
+        ):
+            assert connector.turn_off_port(1) is True
+
+
+@pytest.mark.parametrize(
+    "switch_model",
+    PORT_SWITCH_MODELS,
+)
+def test_switch_port_accepts_pending_apply_page(
+    switch_model: type[AutodetectedSwitchModel],
+) -> None:
+    """Test switching a port when the switch replies with a wait page."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector._set_instance_attributes_by_model(switch_model())
+    connector._client_hash = "client_hash"
+    connector.set_cookie("cookie_name", "cookie_value")
+
+    response = Mock()
+    response.status_code = requests.codes.ok
+    response.content = b"""<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="refresh" content = 4>
+</head>
+<body>Please wait...<input type='hidden' name='hash' value='4554'></body>
+</html>"""
+
+    with (
+        patch(
+            "py_netgear_plus.fetcher.requests.request",
+            return_value=response,
+        ),
+        patch("py_netgear_plus.time.sleep") as mock_sleep,
+        patch(
+            "py_netgear_plus.NetgearSwitchConnector.get_switch_infos",
+            return_value={},
+        ),
+    ):
+        assert connector.turn_off_port(1) is True
+        mock_sleep.assert_called_with(4.0)
+        assert connector._client_hash == "4554"
+
+
+@pytest.mark.parametrize(
+    "switch_model",
     TEST_MODELS,
 )
 def test_turn_on_and_off_poe_port(switch_model: type[AutodetectedSwitchModel]) -> None:
@@ -495,6 +715,39 @@ def test_turn_on_and_off_poe_port(switch_model: type[AutodetectedSwitchModel]) -
                     timeout=URL_REQUEST_TIMEOUT,
                     allow_redirects=False,
                 )
+
+
+@pytest.mark.parametrize(
+    ("port_suffix", "expected_cookie_port"),
+    [("", None), (":80", "80"), (":1337", "1337")],
+)
+def test_non_standard_tcp_ports(port_suffix: str, expected_cookie_port: int) -> None:
+    """Test whether cookie port and domain are split correctly."""
+    response = BaseResponse()
+    response.status_code = requests.codes.ok
+    response.content = b"SUCCESS"
+    with patch(
+        "py_netgear_plus.fetcher.requests.request",
+        return_value=response,
+    ) as mock_request:
+        mock_request.return_value = response
+        host_portion = "192.168.0.1"
+        concatenated = f"{host_portion}{port_suffix}"
+
+        connector = NetgearSwitchConnector(host=concatenated, password="password")
+        connector.set_cookie("demo", "demo")
+
+        connector._page_fetcher.request("get", concatenated)
+
+    mock_request.assert_called_once()
+
+    assert "cookies" in mock_request.call_args.kwargs
+    cookies = list(mock_request.call_args.kwargs["cookies"])
+
+    assert len(cookies) == 1
+    only_cookie: Cookie = cookies.pop()
+    assert only_cookie.port == expected_cookie_port
+    assert only_cookie.domain == host_portion
 
 
 @pytest.mark.parametrize(
@@ -582,6 +835,168 @@ def test_reboot(
                 timeout=URL_REQUEST_TIMEOUT,
                 allow_redirects=False,
             )
+
+
+class JsonApiTestHelper:
+    """Helper for JSON REST API switch tests (MS3xx series)."""
+
+    def __init__(self, model_name: str) -> None:
+        """Initialize the JSON API test helper."""
+        self.data_dir = Path(f"pages/{model_name}")
+        self._sequence = 0
+
+    def next_sequence(self) -> int:
+        """Get the next sequence number."""
+        self._sequence += 1
+        return self._sequence
+
+    @staticmethod
+    def make_json_response(filepath: Path) -> Mock:
+        """Create a mock response from a JSON file."""
+        resp = Mock()
+        resp.status_code = requests.codes.ok
+        content = filepath.read_bytes()
+        resp.content = content
+        resp.json.return_value = json.loads(content)
+        return resp
+
+    def mock_json_request(self, method: str, url: str, **kwargs: dict) -> Mock:  # noqa: ARG002
+        """Mock json_request based on URL."""
+        if "/api/system/status" in url:
+            return self.make_json_response(self.data_dir / "system_status.json")
+        if "/api/system/login" in url:
+            return self.make_json_response(self.data_dir / "login.json")
+        if "/api/login_session" in url:
+            return self.make_json_response(self.data_dir / "login_session.json")
+        if "/api/ports/statistics" in url:
+            return self.make_json_response(
+                self.data_dir / str(self._sequence) / "ports_statistics.json"
+            )
+        if "/api/ports" in url:
+            return self.make_json_response(
+                self.data_dir / str(self._sequence) / "ports.json"
+            )
+        resp = Mock()
+        resp.status_code = requests.codes.not_found
+        return resp
+
+
+JSON_API_MODELS = [
+    (MS305E, 5),
+    (MS308E, 8),
+]
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_autodetect_model(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,
+) -> None:
+    """Test autodetect_model for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    with patch.object(
+        connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
+    ):
+        connector.autodetect_model()
+    assert isinstance(connector.switch_model, switch_model)
+    assert connector.switch_model.MODEL_NAME == switch_model.MODEL_NAME
+    assert connector.ports == expected_ports
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_login_cookie(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_login_cookie for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    with patch.object(
+        connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
+    ):
+        connector.autodetect_model()
+        assert connector.get_login_cookie() is True
+        assert connector._page_fetcher.has_bearer_token() is True
+        # Second call should return True without re-login
+        assert connector.get_login_cookie() is True
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_delete_login_cookie(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test delete_login_cookie for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    with patch.object(
+        connector._page_fetcher, "json_request", side_effect=helper.mock_json_request
+    ):
+        connector.autodetect_model()
+        connector.get_login_cookie()
+    assert connector._page_fetcher.has_bearer_token() is True
+    connector.delete_login_cookie()
+    assert connector._page_fetcher.has_bearer_token() is False
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_unique_id(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_unique_id for JSON REST API switches."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector.switch_model = switch_model
+    expected = f"{switch_model.MODEL_NAME.lower()}_192_168_0_1"
+    assert connector.get_unique_id() == expected
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_get_switch_infos(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,  # noqa: ARG001
+) -> None:
+    """Test get_switch_infos for JSON REST API switches."""
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    with patch("py_netgear_plus.time.perf_counter", return_value=0):
+        connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+        with patch.object(
+            connector._page_fetcher,
+            "json_request",
+            side_effect=helper.mock_json_request,
+        ):
+            connector.autodetect_model()
+            connector.get_login_cookie()
+
+        for sequence in range(2):
+            with patch.object(
+                connector._page_fetcher,
+                "json_request",
+                side_effect=helper.mock_json_request,
+            ):
+                switch_data = connector.get_switch_infos()
+            with Path(
+                f"pages/{switch_model.MODEL_NAME}/{sequence}/switch_infos.json"
+            ).open() as file:
+                validation_data = json.loads(file.read())
+                assert switch_data == validation_data
+            helper.next_sequence()
 
 
 if __name__ == "__main__":
