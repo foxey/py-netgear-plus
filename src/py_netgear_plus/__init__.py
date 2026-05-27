@@ -748,6 +748,64 @@ class NetgearSwitchConnector:
             )
         return False
 
+    def get_port_settings(self) -> dict[int, dict[str, Any]]:
+        """Return per-port settings (name/speed/rates/flow-control)."""
+        if not self.switch_model.PORT_SETTINGS_TEMPLATES:
+            message = "Port settings cannot be read on this model"
+            raise NotImplementedError(message)
+        response = self.fetch_page_from_templates(
+            self.switch_model.SWITCH_INFO_TEMPLATES
+        )
+        return self._page_parser.parse_port_settings(response)
+
+    def set_port_name(self, port: int, name: str) -> bool:
+        """Rename a port, preserving other port settings."""
+        if not self.switch_model.PORT_SETTINGS_TEMPLATES:
+            message = "Port renaming is not supported on this model"
+            raise NotImplementedError(message)
+
+        all_settings = self.get_port_settings()
+        if port not in all_settings:
+            message = f"Port {port} not found on switch"
+            raise PortNumberOutofRangeError(message)
+        cur = all_settings[port]
+
+        for template in self.switch_model.PORT_SETTINGS_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_port_settings_data(
+                port=port,
+                description=name,
+                speed=cur["speed"],
+                flow_control=cur["flow_control"],
+                ingress_rate=cur["ingress_rate"],
+                egress_rate=cur["egress_rate"],
+                priority=0,
+            )
+            _LOGGER.debug("set_port_name data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            if self._page_fetcher.has_ok_status(response):
+                self._loaded_switch_metadata = {}
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_port_name response was %s", content
+            )
+        return False
+
     def _diff_desired_vlans(
         self,
         desired_vlans: dict,

@@ -129,6 +129,7 @@ def main() -> None:
         "status": status_command,
         "version": version_command,
         "vlan": vlan_command,
+        "port": port_command,
     }
 
     if args.command in command_functions:
@@ -245,6 +246,13 @@ def parse_commandline() -> argparse.ArgumentParser:
         action="store_true",
         help="Remove VLANs not listed in the config (except VLAN 1)",
     )
+
+    port_parser = subparsers.add_parser("port", help="Port management")
+    port_sub = port_parser.add_subparsers(dest="port_action")
+    port_sub.add_parser("list", help="Show per-port settings")
+    port_rename = port_sub.add_parser("rename", help="Rename a port")
+    port_rename.add_argument("port", type=int)
+    port_rename.add_argument("name")
 
     return parser
 
@@ -535,6 +543,51 @@ def _vlan_dispatch(  # noqa: PLR0911, PLR0912
         return True
 
     print(f"Unknown vlan action: {action}", file=stderr)  # noqa: T201
+    return False
+
+
+def port_command(  # noqa: PLR0911
+    connector: NetgearSwitchConnector, args: argparse.Namespace
+) -> bool:
+    """Dispatch port subcommands."""
+    if not args.port_action:
+        print("port: missing subcommand", file=stderr)  # noqa: T201
+        return False
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_port_naming():
+        print(  # noqa: T201
+            f"Port naming not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    connector._get_switch_metadata()  # noqa: SLF001
+    try:
+        if args.port_action == "list":
+            settings = connector.get_port_settings()
+            if args.json:
+                print(json.dumps(settings, indent=4, default=str))  # noqa: T201
+            else:
+                for p, s in settings.items():
+                    print(  # noqa: T201
+                        f"  {p}: name='{s['name']}' speed={s['speed']} "
+                        f"ingress={s['ingress_rate']} egress={s['egress_rate']} "
+                        f"flow_ctrl={s['flow_control']}"
+                    )
+            return True
+        if args.port_action == "rename":
+            return connector.set_port_name(args.port, args.name)
+    except NotImplementedError as exc:
+        model = connector.switch_model.MODEL_NAME
+        print(f"Port op not supported on {model}: {exc}", file=stderr)  # noqa: T201
+        return False
+    print(f"Unknown port action: {args.port_action}", file=stderr)  # noqa: T201
     return False
 
 

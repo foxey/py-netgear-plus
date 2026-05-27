@@ -359,6 +359,12 @@ class PageParser:
         """Parse VLAN status from the html page."""
         raise NotImplementedError
 
+    def parse_port_settings(
+        self, page: Response | BaseResponse
+    ) -> dict[int, dict[str, Any]]:
+        """Parse per-port settings (name/speed/rates/flow-control)."""
+        raise NotImplementedError
+
 
 class GS105E(PageParser):
     """Parser for the GS105E switch."""
@@ -1026,6 +1032,37 @@ class GS30xSeries(PageParser):
             "vlans": vlans,
             "ports": ports,
         }
+
+    def parse_port_settings(
+        self, page: Response | BaseResponse
+    ) -> dict[int, dict[str, Any]]:
+        """Parse per-port settings from dashboard.cgi."""
+        tree = html.fromstring(page.content)
+        result: dict[int, dict[str, Any]] = {}
+        for li in tree.xpath('//li[contains(@class, "index_li")]'):
+            port_in = li.xpath('.//input[contains(@class, "port") and @value][1]')
+            if not port_in:
+                continue
+            try:
+                port = int(port_in[0].value)
+            except (TypeError, ValueError):
+                continue
+            name_el = li.xpath('.//input[contains(@class, "portName")]')
+            speed_el = li.xpath(
+                './/input[contains(@class, "Speed") '
+                'and not(contains(@class, "LinkedSpeed"))]'
+            )
+            ing_el = li.xpath('.//input[contains(@class, "ingressRate")]')
+            egr_el = li.xpath('.//input[contains(@class, "egressRate")]')
+            flow_el = li.xpath('.//input[contains(@class, "flowCtr")]')
+            result[port] = {
+                "name": name_el[0].value if name_el else "",
+                "speed": int(speed_el[0].value) if speed_el else 1,
+                "ingress_rate": int(ing_el[0].value) if ing_el else 1,
+                "egress_rate": int(egr_el[0].value) if egr_el else 1,
+                "flow_control": int(flow_el[0].value) if flow_el else 2,
+            }
+        return result
 
 
 class GS305EP(GS30xSeries):

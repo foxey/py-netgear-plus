@@ -128,6 +128,7 @@ class AutodetectedSwitchModel:
     VLAN_MODE_SET_TEMPLATES: ClassVar = []
     VLAN_ADVANCED_SET_TEMPLATES: ClassVar = []
     VLAN_PVID_SET_TEMPLATES: ClassVar = []
+    PORT_SETTINGS_TEMPLATES: ClassVar = []
 
     def __init__(self) -> None:
         """Empty contructor."""
@@ -201,6 +202,31 @@ class AutodetectedSwitchModel:
             and self.VLAN_ADVANCED_SET_TEMPLATES
             and self.VLAN_PVID_SET_TEMPLATES
         )
+
+    def has_port_naming(self) -> bool:
+        """Return true when ports can be renamed."""
+        return bool(self.PORT_SETTINGS_TEMPLATES)
+
+    def get_port_settings_data(  # noqa: PLR0913
+        self,
+        port: int,
+        description: str,
+        speed: int,
+        flow_control: int,
+        ingress_rate: int,
+        egress_rate: int,
+        priority: int,
+    ) -> dict:
+        """Build form data for the port_status.cgi POST."""
+        return {
+            f"port{port}": "checked",
+            "DESCRIPTION": description,
+            "SPEED": str(speed),
+            "FLOW_CONTROL": str(flow_control),
+            "IngressRate": str(ingress_rate),
+            "EgressRate": str(egress_rate),
+            "priority": str(priority),
+        }
 
 
 class GS105E(AutodetectedSwitchModel):
@@ -553,6 +579,14 @@ class GS30xSeries(AutodetectedSwitchModel):
         }
     ]
 
+    PORT_SETTINGS_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/port_status.cgi",
+            "params": {"hash": "_client_hash"},
+        }
+    ]
+
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""
         return {
@@ -826,13 +860,14 @@ class GS316Series(GS30xSeries):
     ]
 
     # GS316* uses a different web UI (iss/specific/*.html) than the
-    # GS305/308 family, so the GS30xSeries VLAN endpoints + DOM
-    # assumptions do not apply. Disable until verified against the
-    # GS316 firmware.
+    # GS305/308 family, so the GS30xSeries VLAN and port-settings
+    # endpoints + DOM assumptions do not apply. Disable until verified
+    # against the GS316 firmware.
     VLAN_STATUS_TEMPLATES: ClassVar = []
     VLAN_MODE_SET_TEMPLATES: ClassVar = []
     VLAN_ADVANCED_SET_TEMPLATES: ClassVar = []
     VLAN_PVID_SET_TEMPLATES: ClassVar = []
+    PORT_SETTINGS_TEMPLATES: ClassVar = []
 
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""

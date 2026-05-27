@@ -1317,5 +1317,33 @@ def test_set_vlan_pvid_decodes_short_response(monkeypatch: pytest.MonkeyPatch) -
         connector.set_vlan_pvid(2, 100)
 
 
+def _mock_page(path: str) -> Mock:
+    """Build a Mock response wrapping fixture bytes."""
+    page = Mock()
+    page.status_code = requests.codes.ok
+    page.content = Path(path).read_bytes()
+    return page
+
+
+def test_parse_port_settings_gs308ep() -> None:
+    """Per-port settings parser returns one row per port with expected fields."""
+    from py_netgear_plus.parsers import GS30xSeries as GS30xParser  # noqa: PLC0415
+
+    result = GS30xParser().parse_port_settings(
+        _mock_page("pages/GS308EP/0/dashboard.cgi")
+    )
+    assert set(result) == set(range(1, 9))
+    # Port 1 of this fixture is named 'wax610b'.
+    assert result[1]["name"] == "wax610b"
+    for info in result.values():
+        assert set(info) == {
+            "name",
+            "speed",
+            "ingress_rate",
+            "egress_rate",
+            "flow_control",
+        }
+
+
 if __name__ == "__main__":
     pytest.main()
