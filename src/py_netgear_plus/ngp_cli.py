@@ -130,6 +130,7 @@ def main() -> None:
         "version": version_command,
         "vlan": vlan_command,
         "port": port_command,
+        "network": network_command,
     }
 
     if args.command in command_functions:
@@ -205,17 +206,22 @@ def parse_commandline() -> argparse.ArgumentParser:
     subparsers.add_parser("status", help="Display switch status")
     subparsers.add_parser("version", help="Display CLI version")
 
+    _add_vlan_subparser(subparsers)
+    _add_port_subparser(subparsers)
+    _add_network_subparser(subparsers)
+
+    return parser
+
+
+def _add_vlan_subparser(subparsers: argparse._SubParsersAction) -> None:
     vlan_parser = subparsers.add_parser("vlan", help="VLAN management")
     vlan_sub = vlan_parser.add_subparsers(dest="vlan_action")
-
     vlan_sub.add_parser("status", help="Show VLAN status")
-
     vlan_mode_parser = vlan_sub.add_parser("mode", help="Set VLAN mode")
     vlan_mode_parser.add_argument(
         "mode",
         choices=["noVlan", "bscPotBsd", "advPotBsd", "bsc8021Q", "adv8021Q"],
     )
-
     for verb in ("add", "edit"):
         sp = vlan_sub.add_parser(verb, help=f"{verb.capitalize()} a VLAN")
         sp.add_argument("vlan_id", type=int)
@@ -229,14 +235,11 @@ def parse_commandline() -> argparse.ArgumentParser:
         )
         sp.add_argument("--voice", action="store_true", help="Mark as voice VLAN")
         sp.add_argument("--voice-cos", type=int, default=6)
-
     vlan_remove_parser = vlan_sub.add_parser("remove", help="Delete a VLAN")
     vlan_remove_parser.add_argument("vlan_id", type=int)
-
     vlan_pvid_parser = vlan_sub.add_parser("pvid", help="Set port PVID")
     vlan_pvid_parser.add_argument("port", type=int)
     vlan_pvid_parser.add_argument("vlan_id", type=int)
-
     vlan_apply_parser = vlan_sub.add_parser(
         "apply", help="Apply a VLAN config from a JSON file"
     )
@@ -247,6 +250,8 @@ def parse_commandline() -> argparse.ArgumentParser:
         help="Remove VLANs not listed in the config (except VLAN 1)",
     )
 
+
+def _add_port_subparser(subparsers: argparse._SubParsersAction) -> None:
     port_parser = subparsers.add_parser("port", help="Port management")
     port_sub = port_parser.add_subparsers(dest="port_action")
     port_sub.add_parser("list", help="Show per-port settings")
@@ -254,7 +259,20 @@ def parse_commandline() -> argparse.ArgumentParser:
     port_rename.add_argument("port", type=int)
     port_rename.add_argument("name")
 
-    return parser
+
+def _add_network_subparser(subparsers: argparse._SubParsersAction) -> None:
+    net_parser = subparsers.add_parser("network", help="IP/DHCP management")
+    net_sub = net_parser.add_subparsers(dest="network_action")
+    net_sub.add_parser("show", help="Show IP/DHCP configuration")
+    net_set = net_sub.add_parser("set", help="Apply IP/DHCP configuration")
+    net_mode = net_set.add_mutually_exclusive_group(required=True)
+    net_mode.add_argument("--dhcp", action="store_true", help="Use DHCP")
+    net_mode.add_argument(
+        "--static",
+        nargs=3,
+        metavar=("IP", "MASK", "GATEWAY"),
+        help="Static IP / subnet mask / gateway",
+    )
 
 
 def command_chooser(
@@ -588,6 +606,82 @@ def port_command(  # noqa: PLR0911
         print(f"Port op not supported on {model}: {exc}", file=stderr)  # noqa: T201
         return False
     print(f"Unknown port action: {args.port_action}", file=stderr)  # noqa: T201
+    return False
+
+
+def network_command(  # noqa: PLR0911, PLR0912
+    connector: NetgearSwitchConnector, args: argparse.Namespace
+) -> bool:
+    """Dispatch network subcommands."""
+    if not args.network_action:
+        print("network: missing subcommand", file=stderr)  # noqa: T201
+        return False
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_ip_config():
+        print(  # noqa: T201
+            f"Network config not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    if args.network_action == "set":
+        connector._get_switch_metadata()  # noqa: SLF001
+    try:
+        if args.network_action == "show":
+            cfg = connector.get_ip_config()
+            if args.json:
+                print(json.dumps(cfg, indent=4))  # noqa: T201
+            else:
+                mode = "DHCP" if cfg["dhcp"] else "Static"
+                print(  # noqa: T201
+                    f"mode={mode} ip={cfg['ip_address']} "
+                    f"mask={cfg['subnet_mask']} gw={cfg['gateway']}"
+                )
+            return True
+        if args.network_action == "set":
+            target_ip = None if args.dhcp else args.static[0]
+            if args.dhcp:
+                result = connector.set_ip_config(dhcp=True)
+            else:
+                ip, mask, gw = args.static
+                result = connector.set_ip_config(
+                    dhcp=False,
+                    ip_address=ip,
+                    subnet_mask=mask,
+                    gateway=gw,
+                )
+            current_host = connector.host
+            if target_ip and target_ip != current_host:
+                print(  # noqa: T201
+                    f"Note: switch IP changed to {target_ip}. The current "
+                    f"TCP session was torn down so the result above may "
+                    f"read False even on success. Run "
+                    f"`ngp-cli login {target_ip}` to re-establish access.",
+                    file=stderr,
+                )
+            elif args.dhcp:
+                print(  # noqa: T201
+                    "Note: DHCP enabled. If the lease yields a different "
+                    "IP, the current session is torn down; ping the new "
+                    "address and `ngp-cli login <new_ip>` to reconnect.",
+                    file=stderr,
+                )
+            return result
+    except NotImplementedError as exc:
+        print(  # noqa: T201
+            f"Network op not supported on {connector.switch_model.MODEL_NAME}: {exc}",
+            file=stderr,
+        )
+        return False
+    print(  # noqa: T201
+        f"Unknown network action: {args.network_action}", file=stderr
+    )
     return False
 
 

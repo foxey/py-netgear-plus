@@ -365,6 +365,11 @@ class PageParser:
         """Parse per-port settings (name/speed/rates/flow-control)."""
         raise NotImplementedError
 
+    def parse_ip_config(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse current IP/DHCP configuration."""
+        del page
+        raise NotImplementedError
+
 
 class GS105E(PageParser):
     """Parser for the GS105E switch."""
@@ -1063,6 +1068,21 @@ class GS30xSeries(PageParser):
                 "flow_control": int(flow_el[0].value) if flow_el else 2,
             }
         return result
+
+    def parse_ip_config(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse current IP/DHCP configuration from ip_dhcp.cgi."""
+        tree = html.fromstring(page.content)
+
+        def _val(xpath: str) -> str:
+            elems = tree.xpath(xpath)
+            return elems[0].value if elems and elems[0].value is not None else ""
+
+        return {
+            "dhcp": _val('//input[@id="dhcpModFlag"]').lower() == "true",
+            "ip_address": _val('//input[@id="ipStr"]'),
+            "subnet_mask": _val('//input[@id="netMaskStr"]'),
+            "gateway": _val('//input[@id="gatewayStr"]'),
+        }
 
 
 class GS305EP(GS30xSeries):

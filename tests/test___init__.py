@@ -1345,5 +1345,39 @@ def test_parse_port_settings_gs308ep() -> None:
         }
 
 
+def test_parse_ip_config_gs308ep() -> None:
+    """IP/DHCP parser pulls dhcp flag + addresses from ip_dhcp.cgi."""
+    from py_netgear_plus.parsers import GS30xSeries as GS30xParser  # noqa: PLC0415
+
+    result = GS30xParser().parse_ip_config(_mock_page("pages/GS308EP/0/ip_dhcp.cgi"))
+    assert result == {
+        "dhcp": True,
+        "ip_address": "10.156.22.73",
+        "subnet_mask": "255.255.255.0",
+        "gateway": "10.156.22.1",
+    }
+
+
+def test_get_ip_config_data_static_and_dhcp() -> None:
+    """IP-config builder maps dhcp bool to dhcpMode '0'/'1'."""
+    model = GS308EP()
+    static = model.get_ip_config_data(
+        dhcp=False,
+        ip_address="1.2.3.4",
+        subnet_mask="255.255.255.0",
+        gateway="1.2.3.1",
+    )
+    assert static == {
+        "dhcpMode": "0",
+        "ip_address": "1.2.3.4",
+        "subnet_mask": "255.255.255.0",
+        "gateway_address": "1.2.3.1",
+    }
+    dhcp = model.get_ip_config_data(
+        dhcp=True, ip_address="", subnet_mask="", gateway=""
+    )
+    assert dhcp["dhcpMode"] == "1"
+
+
 if __name__ == "__main__":
     pytest.main()

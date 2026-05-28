@@ -133,8 +133,12 @@ def _record(
 class NetgearSwitchConnector:
     """Representation of a Netgear Switch."""
 
-    # Backoff before retrying a fetch that timed out without a status
-    # code (switch was briefly unresponsive).
+    # The switch goes briefly unresponsive during state transitions
+    # (VLAN mode flip, IP/DHCP change) and during transient timeouts.
+    # These sleeps give it time to settle so the next request lands on
+    # the committed state.
+    VLAN_MODE_SETTLE_SECONDS = 3.0
+    IP_CONFIG_SETTLE_SECONDS = 3.0
     RETRY_BACKOFF_SECONDS = 3.0
 
     def __init__(self, host: str, password: str) -> None:
@@ -606,6 +610,10 @@ class NetgearSwitchConnector:
             if self._page_fetcher.has_ok_status(response):
                 # Clear cached metadata to refetch on next poll
                 self._loaded_switch_metadata = {}
+                # Switch becomes unresponsive for a few seconds after a
+                # mode change; let it settle before the caller fires
+                # the next request.
+                time.sleep(self.VLAN_MODE_SETTLE_SECONDS)
                 return True
             content = response.content
             if isinstance(content, (bytes, str)):
@@ -803,6 +811,80 @@ class NetgearSwitchConnector:
                 content = content.strip()
             _LOGGER.warning(
                 "NetgearSwitchConnector.set_port_name response was %s", content
+            )
+        return False
+
+    def get_ip_config(self) -> dict[str, Any]:
+        """Return current IP/DHCP configuration."""
+        if not self.switch_model.IP_CONFIG_TEMPLATES:
+            message = "IP config cannot be read on this model"
+            raise NotImplementedError(message)
+        response = self.fetch_page_from_templates(self.switch_model.IP_CONFIG_TEMPLATES)
+        return self._page_parser.parse_ip_config(response)
+
+    def set_ip_config(
+        self,
+        *,
+        dhcp: bool,
+        ip_address: str = "",
+        subnet_mask: str = "",
+        gateway: str = "",
+    ) -> bool:
+        """
+        Set IP/DHCP configuration.
+
+        Setting dhcp=True ignores ip_address/subnet_mask/gateway.
+        For static mode all three address fields are required.
+
+        Caveat: when the new configuration changes the switch's IP
+        (static->different IP, static->DHCP yielding a different lease,
+        or DHCP->static), the switch tears down the current TCP
+        connection before the HTTP response is sent. This method then
+        returns False and logs an empty response, even though the
+        change was applied. To confirm, ping the new address and call
+        get_ip_config() against it.
+        """
+        if not self.switch_model.IP_CONFIG_SET_TEMPLATES:
+            message = "IP config cannot be set on this model"
+            raise NotImplementedError(message)
+        if not dhcp and not (ip_address and subnet_mask and gateway):
+            message = "Static mode requires ip_address, subnet_mask and gateway"
+            raise ValueError(message)
+
+        for template in self.switch_model.IP_CONFIG_SET_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_ip_config_data(
+                dhcp=dhcp,
+                ip_address=ip_address,
+                subnet_mask=subnet_mask,
+                gateway=gateway,
+            )
+            _LOGGER.debug("set_ip_config data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            if self._page_fetcher.has_ok_status(response):
+                self._loaded_switch_metadata = {}
+                # The switch applies the new addressing asynchronously;
+                # a get_ip_config() fired immediately will still report
+                # the old state.
+                time.sleep(self.IP_CONFIG_SETTLE_SECONDS)
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_ip_config response was %s", content
             )
         return False
 
