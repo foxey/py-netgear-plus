@@ -999,5 +999,42 @@ def test_json_api_get_switch_infos(
             helper.next_sequence()
 
 
+def test_fetch_page_from_templates_timeout_backs_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Timeout-shaped failure retries via backoff, not via get_login_cookie."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector.switch_model = GS308EP()
+    connector.RETRY_BACKOFF_SECONDS = 0  # speed test
+
+    calls = {"count": 0}
+    good = BaseResponse()
+    good.status_code = requests.codes.ok
+    good.content = b"OK"
+    bad = BaseResponse()
+    bad.status_code = None  # simulate timeout
+    bad.content = b""
+
+    def fake_fetch(*_a: object, **_kw: object) -> BaseResponse:
+        calls["count"] += 1
+        return bad if calls["count"] == 1 else good
+
+    relogin_called = {"count": 0}
+
+    def fake_login() -> bool:
+        relogin_called["count"] += 1
+        return True
+
+    monkeypatch.setattr(connector, "fetch_page", fake_fetch)
+    monkeypatch.setattr(connector, "get_login_cookie", fake_login)
+
+    result = connector.fetch_page_from_templates(
+        [{"method": "get", "url": "http://{ip}/vlan.cgi"}]
+    )
+    assert result is good
+    assert calls["count"] == 2
+    assert relogin_called["count"] == 0  # timeout path must not re-login
+
+
 if __name__ == "__main__":
     pytest.main()

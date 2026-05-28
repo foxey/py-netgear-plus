@@ -102,6 +102,10 @@ class InvalidPoEPortError(Exception):
 class NetgearSwitchConnector:
     """Representation of a Netgear Switch."""
 
+    # Backoff before retrying a fetch that timed out without a status
+    # code (switch was briefly unresponsive).
+    RETRY_BACKOFF_SECONDS = 3.0
+
     def __init__(self, host: str, password: str) -> None:
         """Initialize Connector Object."""
         self.host = host
@@ -535,13 +539,21 @@ class NetgearSwitchConnector:
         )
         return False
 
-    def fetch_page(self, method: str, url: str, data: dict) -> Response | BaseResponse:
+    def fetch_page(
+        self,
+        method: str,
+        url: str,
+        data: dict,
+        headers: dict[str, str] | None = None,
+    ) -> Response | BaseResponse:
         """Fetch url and retry when first response is a redirect to the login page."""
         response = BaseResponse()
         if not self.get_offline_mode():
             for attempt in range(2):
                 try:
-                    response = self._page_fetcher.request(method, url, data)
+                    response = self._page_fetcher.request(
+                        method, url, data, headers=headers
+                    )
                     break  # Exit the loop if the request is successful
                 except NotLoggedInError as error:
                     if attempt == 0 and self.get_login_cookie():
@@ -561,19 +573,56 @@ class NetgearSwitchConnector:
         return response
 
     def fetch_page_from_templates(self, templates: list) -> Response | BaseResponse:
-        """Return response for 1st successful request from templates."""
-        response = BaseResponse()
-        for template in templates:
-            url = template["url"].format(ip=self.host)
-            method = template["method"]
-            data = {}
-            if not self.get_offline_mode():
-                self._page_fetcher.set_data_from_template(template, self, data)
-            response = self.fetch_page(method, url, data)
-            if self._page_fetcher.has_ok_status(response):
-                return response
+        """
+        Return response for 1st successful request from templates.
+
+        Retries once if every template fails. A timeout-shaped failure
+        (no status_code, empty body) gets a short backoff and a plain
+        re-fetch (no re-login). A non-timeout failure attempts
+        ``get_login_cookie`` first in case the SID was invalidated.
+        """
+
+        def attempt() -> Response | BaseResponse:
+            last: Response | BaseResponse = BaseResponse()
+            for template in templates:
+                url = template["url"].format(ip=self.host)
+                method = template["method"]
+                data: dict = {}
+                if not self.get_offline_mode():
+                    self._page_fetcher.set_data_from_template(template, self, data)
+                headers = self._resolve_template_headers(template)
+                last = self.fetch_page(method, url, data, headers=headers)
+                if self._page_fetcher.has_ok_status(last):
+                    return last
+            return last
+
+        result = attempt()
+        if self._page_fetcher.has_ok_status(result):
+            return result
+
+        looks_like_timeout = (
+            getattr(result, "status_code", None) is None
+            and not getattr(result, "content", None)
+        )
+        if self.get_offline_mode():
+            pass
+        elif looks_like_timeout:
+            time.sleep(self.RETRY_BACKOFF_SECONDS)
+            result = attempt()
+        elif self.get_login_cookie():
+            result = attempt()
+        if self._page_fetcher.has_ok_status(result):
+            return result
+
         message = f"Failed to load any page of templates: {templates}"
         raise PageNotLoadedError(message)
+
+    def _resolve_template_headers(self, template: dict) -> dict[str, str] | None:
+        """Format header values with {ip} so templates can carry e.g. Referer."""
+        headers = template.get("headers")
+        if not headers:
+            return None
+        return {k: v.format(ip=self.host) for k, v in headers.items()}
 
     def get_switch_infos(self) -> dict[str, Any]:
         """Return dict with all available statistics."""
