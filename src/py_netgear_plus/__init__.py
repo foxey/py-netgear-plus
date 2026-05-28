@@ -888,6 +888,102 @@ class NetgearSwitchConnector:
             )
         return False
 
+    def _ensure_password_change_hash(self) -> None:
+        """
+        Populate self._client_hash via dashboard or factory fallback.
+
+        Raises RuntimeError if no hash can be obtained from either path.
+        Always re-fetches: a hash cached from an earlier request may
+        already be stale on the switch (change_password.cgi answers
+        "CHECK HASH FAILED" in that case).
+        """
+        self._client_hash = None
+        self._loaded_switch_metadata = {}
+        with suppress(NetgearPlusPageParserError, PageNotLoadedError):
+            self._get_switch_metadata()
+        if self._client_hash:
+            return
+        if self.switch_model.INITIAL_PASSWORD_HASH_TEMPLATES:
+            try:
+                page = self.fetch_page_from_templates(
+                    self.switch_model.INITIAL_PASSWORD_HASH_TEMPLATES
+                )
+            except PageNotLoadedError:
+                page = None
+            if page is not None:
+                with suppress(NetgearPlusPageParserError):
+                    self._client_hash = self._page_parser.parse_initial_password_hash(
+                        page
+                    )
+        if not self._client_hash:
+            message = (
+                "Could not obtain client hash for password change "
+                "(neither dashboard nor factory fallback yielded one)."
+            )
+            raise RuntimeError(message)
+
+    def change_password(self, old_password: str, new_password: str) -> bool:
+        """
+        Change the admin password.
+
+        On success the switch invalidates the current session; this
+        method updates the connector's stored password so the next call
+        triggers an automatic re-login with the new password.
+
+        Works both on a normally configured switch (hash read from
+        dashboard.cgi) and on a factory-state switch (hash read from
+        the changeDefPwdCk.cgi iframe shown on /index.cgi).
+        """
+        if not self.switch_model.PASSWORD_CHANGE_TEMPLATES:
+            message = "Password change is not supported on this model"
+            raise NotImplementedError(message)
+
+        self._ensure_password_change_hash()
+
+        for template in self.switch_model.PASSWORD_CHANGE_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_password_change_data(
+                old_password, new_password
+            )
+            self._page_fetcher.set_data_from_template(template, self, data)
+            headers = self._resolve_template_headers(template)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(
+                    method, url, data, headers=headers
+                )
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(
+                        method, url, data, headers=headers
+                    )
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            body = response.content
+            if isinstance(body, bytes):
+                body = body.decode(errors="replace")
+            body_stripped = (body or "").strip()
+            if (
+                self._page_fetcher.has_ok_status(response)
+                and body_stripped == "SUCCESS"
+            ):
+                self._password = new_password
+                self._client_hash = None
+                self._loaded_switch_metadata = {}
+                return True
+            if body_stripped == "INCORRECT":
+                message = "Old password is incorrect"
+                raise LoginFailedError(message)
+            _LOGGER.warning(
+                "NetgearSwitchConnector.change_password response was %s",
+                body_stripped,
+            )
+        return False
+
     def _diff_desired_vlans(
         self,
         desired_vlans: dict,
@@ -1064,10 +1160,9 @@ class NetgearSwitchConnector:
         if self._page_fetcher.has_ok_status(result):
             return result
 
-        looks_like_timeout = (
-            getattr(result, "status_code", None) is None
-            and not getattr(result, "content", None)
-        )
+        looks_like_timeout = getattr(
+            result, "status_code", None
+        ) is None and not getattr(result, "content", None)
         if self.get_offline_mode():
             pass
         elif looks_like_timeout:

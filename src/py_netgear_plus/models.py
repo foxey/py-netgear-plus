@@ -131,6 +131,8 @@ class AutodetectedSwitchModel:
     PORT_SETTINGS_TEMPLATES: ClassVar = []
     IP_CONFIG_TEMPLATES: ClassVar = []
     IP_CONFIG_SET_TEMPLATES: ClassVar = []
+    PASSWORD_CHANGE_TEMPLATES: ClassVar = []
+    INITIAL_PASSWORD_HASH_TEMPLATES: ClassVar = []
 
     def __init__(self) -> None:
         """Empty contructor."""
@@ -212,6 +214,19 @@ class AutodetectedSwitchModel:
     def has_ip_config(self) -> bool:
         """Return true when IP/DHCP can be read or changed."""
         return bool(self.IP_CONFIG_TEMPLATES and self.IP_CONFIG_SET_TEMPLATES)
+
+    def has_password_change(self) -> bool:
+        """Return true when the admin password can be changed."""
+        return bool(self.PASSWORD_CHANGE_TEMPLATES)
+
+    def get_password_change_data(self, old_password: str, new_password: str) -> dict:
+        """Build form data for change_password.cgi (Base64-encoded passwords)."""
+        import base64  # noqa: PLC0415
+
+        return {
+            "oldPasswd": base64.b64encode(old_password.encode()).decode(),
+            "newPasswd": base64.b64encode(new_password.encode()).decode(),
+        }
 
     def get_ip_config_data(
         self,
@@ -620,6 +635,28 @@ class GS30xSeries(AutodetectedSwitchModel):
         }
     ]
 
+    PASSWORD_CHANGE_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/change_password.cgi",
+            "params": {"hash": "_client_hash"},
+            # In factory-default state the CGI 404s without this Referer;
+            # harmless once a non-default password is set.
+            "headers": {"Referer": "http://{ip}/index.cgi"},
+        }
+    ]
+
+    # Used after first login on a factory-fresh switch, when the
+    # regular dashboard.cgi page just redirects to /index.cgi and no
+    # client_hash can be extracted from it.
+    INITIAL_PASSWORD_HASH_TEMPLATES: ClassVar = [
+        {
+            "method": "get",
+            "url": "http://{ip}/changeDefPwdCk.cgi",
+            "headers": {"Referer": "http://{ip}/index.cgi"},
+        }
+    ]
+
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""
         return {
@@ -893,9 +930,10 @@ class GS316Series(GS30xSeries):
     ]
 
     # GS316* uses a different web UI (iss/specific/*.html) than the
-    # GS305/308 family, so the GS30xSeries VLAN, port-settings and
-    # IP/DHCP endpoints + DOM assumptions do not apply. Disable until
-    # verified against the GS316 firmware.
+    # GS305/308 family, so the GS30xSeries CGI endpoints + DOM
+    # assumptions for VLAN, port-settings, IP/DHCP, and the password
+    # change/factory-hash pages do not apply. Disable until verified
+    # against the GS316 firmware.
     VLAN_STATUS_TEMPLATES: ClassVar = []
     VLAN_MODE_SET_TEMPLATES: ClassVar = []
     VLAN_ADVANCED_SET_TEMPLATES: ClassVar = []
@@ -903,6 +941,8 @@ class GS316Series(GS30xSeries):
     PORT_SETTINGS_TEMPLATES: ClassVar = []
     IP_CONFIG_TEMPLATES: ClassVar = []
     IP_CONFIG_SET_TEMPLATES: ClassVar = []
+    PASSWORD_CHANGE_TEMPLATES: ClassVar = []
+    INITIAL_PASSWORD_HASH_TEMPLATES: ClassVar = []
 
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""

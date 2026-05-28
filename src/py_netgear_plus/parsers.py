@@ -237,6 +237,11 @@ class PageParser:
         tree = html.fromstring(page.content)
         return get_first_value(tree, '//input[@name="hash"]')
 
+    def parse_initial_password_hash(self, page: Response | BaseResponse) -> str | None:
+        """Parse the hash served by the factory-state hash iframe."""
+        del page
+        raise NotImplementedError
+
     def parse_led_status(self, page: Response | BaseResponse) -> dict[str, Any]:
         """Parse status of the front panel LEDs from the html page."""
         raise NotImplementedError
@@ -1083,6 +1088,11 @@ class GS30xSeries(PageParser):
             "subnet_mask": _val('//input[@id="netMaskStr"]'),
             "gateway": _val('//input[@id="gatewayStr"]'),
         }
+
+    def parse_initial_password_hash(self, page: Response | BaseResponse) -> str | None:
+        """Parse the hash served by the factory-state hash iframe."""
+        tree = html.fromstring(page.content)
+        return get_first_value(tree, '//input[@id="hashEle"]')
 
 
 class GS305EP(GS30xSeries):

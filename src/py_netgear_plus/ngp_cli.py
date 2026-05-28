@@ -131,6 +131,7 @@ def main() -> None:
         "vlan": vlan_command,
         "port": port_command,
         "network": network_command,
+        "password": password_command,
     }
 
     if args.command in command_functions:
@@ -209,8 +210,15 @@ def parse_commandline() -> argparse.ArgumentParser:
     _add_vlan_subparser(subparsers)
     _add_port_subparser(subparsers)
     _add_network_subparser(subparsers)
+    _add_password_subparser(subparsers)
 
     return parser
+
+
+def _add_password_subparser(subparsers: argparse._SubParsersAction) -> None:
+    pw_parser = subparsers.add_parser("password", help="Change admin password")
+    pw_parser.add_argument("old", help="Current admin password")
+    pw_parser.add_argument("new", help="New admin password")
 
 
 def _add_vlan_subparser(subparsers: argparse._SubParsersAction) -> None:
@@ -683,6 +691,44 @@ def network_command(  # noqa: PLR0911, PLR0912
         f"Unknown network action: {args.network_action}", file=stderr
     )
     return False
+
+
+def password_command(
+    connector: NetgearSwitchConnector, args: argparse.Namespace
+) -> bool:
+    """
+    Change the admin password.
+
+    Takes the current and new passwords as positional arguments. The
+    current password is independent of the --password/NETGEAR_PLUS_PASSWORD
+    auth credential used to establish the session.
+    """
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_password_change():
+        print(  # noqa: T201
+            f"Password change not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    # Ensure the soft-auth re-login fallback uses the current password.
+    connector._password = args.old  # noqa: SLF001
+    try:
+        ok = connector.change_password(args.old, args.new)
+    except LoginFailedError as exc:
+        print(f"Password change rejected: {exc}", file=stderr)  # noqa: T201
+        return False
+    if ok:
+        print("Password changed. Session invalidated; run `ngp-cli login` again.")  # noqa: T201
+        if Path(COOKIE_FILE).exists():
+            Path(COOKIE_FILE).unlink()
+    return ok
 
 
 if __name__ == "__main__":

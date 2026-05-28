@@ -1358,6 +1358,30 @@ def test_parse_ip_config_gs308ep() -> None:
     }
 
 
+def test_parse_initial_password_hash_gs308ep() -> None:
+    """Factory-state hash iframe parser pulls the hidden value."""
+    from py_netgear_plus.parsers import GS30xSeries as GS30xParser  # noqa: PLC0415
+
+    page = Mock()
+    page.status_code = requests.codes.ok
+    page.content = (
+        b"<html><body><form>"
+        b"<input type='hidden' name='hash' id='hashEle' value='abc123'>"
+        b"</form></body></html>"
+    )
+    assert GS30xParser().parse_initial_password_hash(page) == "abc123"
+
+
+def test_get_password_change_data_base64() -> None:
+    """Password change builder Base64-encodes old + new passwords."""
+    import base64  # noqa: PLC0415
+
+    model = GS308EP()
+    data = model.get_password_change_data("oldpw", "newpw!")
+    assert data["oldPasswd"] == base64.b64encode(b"oldpw").decode()
+    assert data["newPasswd"] == base64.b64encode(b"newpw!").decode()
+
+
 def test_get_ip_config_data_static_and_dhcp() -> None:
     """IP-config builder maps dhcp bool to dhcpMode '0'/'1'."""
     model = GS308EP()
@@ -1377,6 +1401,35 @@ def test_get_ip_config_data_static_and_dhcp() -> None:
         dhcp=True, ip_address="", subnet_mask="", gateway=""
     )
     assert dhcp["dhcpMode"] == "1"
+
+
+def test_capability_matrix() -> None:
+    """New capability helpers true on GS30xEP family, false elsewhere."""
+    from py_netgear_plus.models import (  # noqa: PLC0415
+        GS305E,
+        GS305EP,
+        GS305EPP,
+        GS308EP,
+        GS308EPP,
+        GS316EP,
+        GS316EPP,
+        GS108Ev3,
+    )
+
+    expected_true = (GS305EP, GS305EPP, GS308EP, GS308EPP)
+    expected_false = (GS316EP, GS316EPP, GS108Ev3, GS305E)
+    for cls in expected_true:
+        m = cls()
+        assert m.has_vlan_support(), cls.__name__
+        assert m.has_port_naming(), cls.__name__
+        assert m.has_ip_config(), cls.__name__
+        assert m.has_password_change(), cls.__name__
+    for cls in expected_false:
+        m = cls()
+        assert not m.has_vlan_support(), cls.__name__
+        assert not m.has_port_naming(), cls.__name__
+        assert not m.has_ip_config(), cls.__name__
+        assert not m.has_password_change(), cls.__name__
 
 
 if __name__ == "__main__":
