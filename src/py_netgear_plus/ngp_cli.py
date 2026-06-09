@@ -20,6 +20,7 @@ Commands:
     version           Display the CLI version.
     vlan              Manage VLAN configuration (sub: status/mode/add/edit/
                         remove/pvid/apply).
+    led               Control front panel LEDs (sub: on/off/status).
 
 Options:
     --password, -P    Specify the password for the switch. If not provided,
@@ -132,6 +133,7 @@ def main() -> None:
         "port": port_command,
         "network": network_command,
         "password": password_command,
+        "led": led_command,
     }
 
     if args.command in command_functions:
@@ -211,8 +213,17 @@ def parse_commandline() -> argparse.ArgumentParser:
     _add_port_subparser(subparsers)
     _add_network_subparser(subparsers)
     _add_password_subparser(subparsers)
+    _add_led_subparser(subparsers)
 
     return parser
+
+
+def _add_led_subparser(subparsers: argparse._SubParsersAction) -> None:
+    led_parser = subparsers.add_parser("led", help="Front panel LED control")
+    led_sub = led_parser.add_subparsers(dest="led_action")
+    led_sub.add_parser("on", help="Turn on front panel LEDs")
+    led_sub.add_parser("off", help="Turn off front panel LEDs")
+    led_sub.add_parser("status", help="Show front panel LED status")
 
 
 def _add_password_subparser(subparsers: argparse._SubParsersAction) -> None:
@@ -691,6 +702,34 @@ def network_command(  # noqa: PLR0911, PLR0912
         f"Unknown network action: {args.network_action}", file=stderr
     )
     return False
+
+
+def led_command(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Dispatch front panel LED subcommands."""
+    if not args.led_action:
+        print("led: missing subcommand", file=stderr)  # noqa: T201
+        return False
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_led_switch():
+        print(  # noqa: T201
+            f"LED control not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    if args.led_action == "status":
+        switch_infos = connector.get_switch_infos()
+        status = switch_infos.get("led_status", "unknown")
+        print(f"LED status: {status}")  # noqa: T201
+        return True
+    connector._get_switch_metadata()  # noqa: SLF001
+    return connector.switch_leds(args.led_action)
 
 
 def password_command(
