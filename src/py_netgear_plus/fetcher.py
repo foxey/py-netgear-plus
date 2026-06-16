@@ -220,12 +220,12 @@ class PageFetcher:
             response.status_code = status_code_unauthorized
             return
 
-        self._normalise_json_status_model(url, response, body)
+        self._normalize_json_status_model(url, response, body)
 
-    def _normalise_json_status_model(
+    def _normalize_json_status_model(
         self, url: str, response: Response | BaseResponse, body: dict[str, Any]
     ) -> None:
-        """Normalise JSON REST status model info for autodetection."""
+        """Normalize JSON REST status model info for autodetection."""
         if "/api/system/status" not in url:
             return
 
@@ -245,11 +245,12 @@ class PageFetcher:
         ]
         candidate_values.extend(_iter_json_values(body))
 
-        json_api_models = [
-            mdl_cls()
-            for mdl_cls in MODELS
-            if getattr(mdl_cls(), "API_TYPE", "") == "json_rest"
-        ]
+        json_api_models = []
+        for mdl_cls in MODELS:
+            mdl = mdl_cls()
+            if getattr(mdl, "API_TYPE", "") == "json_rest":
+                json_api_models.append(mdl)
+
         for candidate_value in candidate_values:
             normalized_candidate = _normalize_model_identifier(candidate_value)
             if not normalized_candidate:
