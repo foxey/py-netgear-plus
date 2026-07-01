@@ -15,7 +15,7 @@ from .utils import get_all_child_classes_dict
 _LOGGER = logging.getLogger(__name__)
 
 API_V2_CHECKS = {
-    "bootloader": ["V1.00.03", "V2.06.01", "V2.06.02", "V2.06.03", "V1.6.0.2-VB"],
+    "bootloader": ["V1.00.02", "V1.00.03", "V2.06.01", "V2.06.02", "V2.06.03", "V1.6.0.2-VB"],
     "firmware": ["V2.06.24GR", "V2.06.24EN", "V1.6.0.17"],
 }
 
