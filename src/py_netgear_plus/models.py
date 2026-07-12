@@ -294,6 +294,21 @@ class GS305E(AutodetectedSwitchModel):
         {"method": "get", "url": "http://{ip}/portStatistics.cgi"},
     ]
 
+    SWITCH_PORT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/status.cgi",
+            "params": {"hash": "_client_hash"},
+        }
+    ]
+
+    def get_switch_port_data(self, port: int, state: str) -> dict:
+        """Build form data for switching port state via SPEED field."""
+        return {
+            f"port{port}": "checked",
+            "SPEED": 1 if state == "on" else 2,
+        }
+
 
 class GS308E(AutodetectedSwitchModel):
     """Definition for Netgear GS308E model."""
