@@ -25,6 +25,7 @@ from .models import (
     MultipleModelsDetectedError,
     PortNumberOutofRangeError,
     SwitchModelNotDetectedError,
+    VLANMember,
 )
 from .parsers import NetgearPlusPageParserError, create_page_parser
 
@@ -99,8 +100,46 @@ class InvalidPoEPortError(Exception):
     """Port is not a PoE port."""
 
 
+class PortNotVLANMemberError(Exception):
+    """Port is not a member of a VLAN."""
+
+
+def _normalize_ports(ports_config: str | list) -> str:
+    """Coerce a list-of-strings ports_config to its single-char form."""
+    if isinstance(ports_config, list):
+        return "".join(x[0] for x in ports_config)
+    return ports_config
+
+
+def _cfg_to_ports_string(cfg: dict[int, "VLANMember"]) -> str:
+    """Render a port→VLANMember mapping as a 'TUUUUUUE' string."""
+    return "".join(cfg[port] for port in sorted(cfg))
+
+
+def _record(
+    summary: dict[str, list],
+    ok: bool,  # noqa: FBT001
+    bucket: str,
+    item: Any,
+    op: str,
+) -> None:
+    """Append item to bucket on success or to the 'failed' bucket otherwise."""
+    if ok:
+        summary[bucket].append(item)
+    else:
+        summary["failed"].append((op, item))
+
+
 class NetgearSwitchConnector:
     """Representation of a Netgear Switch."""
+
+    # The switch goes briefly unresponsive during state transitions
+    # (VLAN mode flip, IP/DHCP change) and during transient timeouts.
+    # These sleeps give it time to settle so the next request lands on
+    # the committed state.
+    VLAN_MODE_SETTLE_SECONDS = 3.0
+    IP_CONFIG_SETTLE_SECONDS = 3.0
+    RETRY_BACKOFF_SECONDS = 3.0
 
     def __init__(self, host: str, password: str) -> None:
         """Initialize Connector Object."""
@@ -535,13 +574,546 @@ class NetgearSwitchConnector:
         )
         return False
 
-    def fetch_page(self, method: str, url: str, data: dict) -> Response | BaseResponse:
+    def vlan_status(self) -> dict:
+        """Get informations about current vlan mode, and its configuration."""
+        if not self.switch_model.VLAN_STATUS_TEMPLATES:
+            message = "VLAN status cannot be queried on this model"
+            raise NotImplementedError(message)
+        response = self.fetch_page_from_templates(
+            self.switch_model.VLAN_STATUS_TEMPLATES
+        )
+        return self._page_parser.parse_vlan_status(response)
+
+    def set_vlan_mode(self, mode: str) -> bool:
+        """Set vlan mode."""
+        if not self.switch_model.VLAN_MODE_SET_TEMPLATES:
+            message = "VLAN mode cannot be changed on this model"
+            raise NotImplementedError(message)
+
+        for template in self.switch_model.VLAN_MODE_SET_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_vlan_mode_data(mode)  # type: ignore[report-call-issue]
+            _LOGGER.debug("vlan_mode data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            if self._page_fetcher.has_ok_status(response):
+                # Clear cached metadata to refetch on next poll
+                self._loaded_switch_metadata = {}
+                # Switch becomes unresponsive for a few seconds after a
+                # mode change; let it settle before the caller fires
+                # the next request.
+                time.sleep(self.VLAN_MODE_SETTLE_SECONDS)
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_vlan_mode response was %s",
+                content,
+            )
+        return False
+
+    def add_vlan(
+        self,
+        vlan_id: int,
+        vlan_name: str | None = None,
+        ports_config: str | list | None = None,
+        voice_vlan: bool = False,  # noqa: FBT001, FBT002
+        voice_cos: int = 6,
+    ) -> bool:
+        """Add a new VLAN."""
+        return self._set_advanced_vlan_parameter(
+            "Add", vlan_id, vlan_name, ports_config, voice_vlan, voice_cos
+        )
+
+    def edit_vlan(
+        self,
+        vlan_id: int,
+        vlan_name: str | None = None,
+        ports_config: str | list | None = None,
+        voice_vlan: bool = False,  # noqa: FBT001, FBT002
+        voice_cos: int = 6,
+    ) -> bool:
+        """Edit an existing VLAN."""
+        return self._set_advanced_vlan_parameter(
+            "Apply", vlan_id, vlan_name, ports_config, voice_vlan, voice_cos
+        )
+
+    def remove_vlan(self, vlan_id: int) -> bool:
+        """Remove a VLAN."""
+        return self._set_advanced_vlan_parameter("Delete", vlan_id)
+
+    def _set_advanced_vlan_parameter(  # noqa: PLR0913
+        self,
+        action: str,
+        vlan_id: int,
+        vlan_name: str | None = None,
+        ports_config: str | list | None = None,
+        voice_vlan: bool = False,  # noqa: FBT001, FBT002
+        voice_cos: int = 6,
+    ) -> bool:
+        """Change advanced vlan parameters."""
+        if not self.switch_model.VLAN_ADVANCED_SET_TEMPLATES:
+            message = "VLAN advanced parameters cannot be changed on this model"
+            raise NotImplementedError(message)
+
+        for template in self.switch_model.VLAN_ADVANCED_SET_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+
+            data = self.switch_model.get_advanced_vlan_data(
+                action, vlan_id, vlan_name, ports_config, voice_vlan, voice_cos
+            )  # type: ignore[report-call-issue]
+            _LOGGER.debug("advanced_vlan_parameter data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            # It doesn't look like there is any way to know that the action failed.
+            # For example, deleting a VLAN that do not exist return 200 with no
+            # error or warn in sight.
+            if self._page_fetcher.has_ok_status(response):
+                # Clear cached metadata to refetch on next poll
+                self._loaded_switch_metadata = {}
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_advanced_vlan_parameter response was %s",
+                content,
+            )
+        return False
+
+    def set_vlan_pvid(self, port_idx: int, vlan_id: int) -> bool:
+        """Set pvid for a vlan."""
+        if not self.switch_model.VLAN_PVID_SET_TEMPLATES:
+            message = "VLAN pvid parameters cannot be changed on this model"
+            raise NotImplementedError(message)
+
+        for template in self.switch_model.VLAN_PVID_SET_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+
+            data = self.switch_model.get_pvid_data(port_idx, vlan_id)  # type: ignore[report-call-issue]
+            _LOGGER.debug("vlan_pvid data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            if self._page_fetcher.has_ok_status(response):
+                # It does not seem there is anything to latch on except
+                # checking if the message size is to small to be an
+                # HTML answer.
+                content_min_size = 30
+                if len(response.content) < content_min_size:
+                    raw = response.content
+                    if isinstance(raw, bytes):
+                        raw = raw.decode(errors="replace")
+                    r = raw.split("@")
+                    min_parts = 3
+                    if len(r) >= min_parts:
+                        message = f"Port {r[1]} is not a member of VLAN {r[2][1:-1]}"
+                    else:
+                        message = f"Unexpected short response: {raw!r}"
+                    raise PortNotVLANMemberError(message)
+                # Clear cached metadata to refetch on next poll
+                self._loaded_switch_metadata = {}
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_vlan_pvid response was %s",
+                content,
+            )
+        return False
+
+    def get_port_settings(self) -> dict[int, dict[str, Any]]:
+        """Return per-port settings (name/speed/rates/flow-control)."""
+        if not self.switch_model.PORT_SETTINGS_TEMPLATES:
+            message = "Port settings cannot be read on this model"
+            raise NotImplementedError(message)
+        response = self.fetch_page_from_templates(
+            self.switch_model.SWITCH_INFO_TEMPLATES
+        )
+        return self._page_parser.parse_port_settings(response)
+
+    def set_port_name(self, port: int, name: str) -> bool:
+        """Rename a port, preserving other port settings."""
+        if not self.switch_model.PORT_SETTINGS_TEMPLATES:
+            message = "Port renaming is not supported on this model"
+            raise NotImplementedError(message)
+
+        all_settings = self.get_port_settings()
+        if port not in all_settings:
+            message = f"Port {port} not found on switch"
+            raise PortNumberOutofRangeError(message)
+        cur = all_settings[port]
+
+        for template in self.switch_model.PORT_SETTINGS_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_port_settings_data(
+                port=port,
+                description=name,
+                speed=cur["speed"],
+                flow_control=cur["flow_control"],
+                ingress_rate=cur["ingress_rate"],
+                egress_rate=cur["egress_rate"],
+                priority=0,
+            )
+            _LOGGER.debug("set_port_name data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            if self._page_fetcher.has_ok_status(response):
+                self._loaded_switch_metadata = {}
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_port_name response was %s", content
+            )
+        return False
+
+    def get_ip_config(self) -> dict[str, Any]:
+        """Return current IP/DHCP configuration."""
+        if not self.switch_model.IP_CONFIG_TEMPLATES:
+            message = "IP config cannot be read on this model"
+            raise NotImplementedError(message)
+        response = self.fetch_page_from_templates(self.switch_model.IP_CONFIG_TEMPLATES)
+        return self._page_parser.parse_ip_config(response)
+
+    def set_ip_config(
+        self,
+        *,
+        dhcp: bool,
+        ip_address: str = "",
+        subnet_mask: str = "",
+        gateway: str = "",
+    ) -> bool:
+        """
+        Set IP/DHCP configuration.
+
+        Setting dhcp=True ignores ip_address/subnet_mask/gateway.
+        For static mode all three address fields are required.
+
+        Caveat: when the new configuration changes the switch's IP
+        (static->different IP, static->DHCP yielding a different lease,
+        or DHCP->static), the switch tears down the current TCP
+        connection before the HTTP response is sent. This method then
+        returns False and logs an empty response, even though the
+        change was applied. To confirm, ping the new address and call
+        get_ip_config() against it.
+        """
+        if not self.switch_model.IP_CONFIG_SET_TEMPLATES:
+            message = "IP config cannot be set on this model"
+            raise NotImplementedError(message)
+        if not dhcp and not (ip_address and subnet_mask and gateway):
+            message = "Static mode requires ip_address, subnet_mask and gateway"
+            raise ValueError(message)
+
+        for template in self.switch_model.IP_CONFIG_SET_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_ip_config_data(
+                dhcp=dhcp,
+                ip_address=ip_address,
+                subnet_mask=subnet_mask,
+                gateway=gateway,
+            )
+            _LOGGER.debug("set_ip_config data=%s", data)
+            self._page_fetcher.set_data_from_template(template, self, data)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(method, url, data)
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(method, url, data)
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            if self._page_fetcher.has_ok_status(response):
+                self._loaded_switch_metadata = {}
+                # The switch applies the new addressing asynchronously;
+                # a get_ip_config() fired immediately will still report
+                # the old state.
+                time.sleep(self.IP_CONFIG_SETTLE_SECONDS)
+                return True
+            content = response.content
+            if isinstance(content, (bytes, str)):
+                content = content.strip()
+            _LOGGER.warning(
+                "NetgearSwitchConnector.set_ip_config response was %s", content
+            )
+        return False
+
+    def _ensure_password_change_hash(self) -> None:
+        """
+        Populate self._client_hash via dashboard or factory fallback.
+
+        Raises RuntimeError if no hash can be obtained from either path.
+        Always re-fetches: a hash cached from an earlier request may
+        already be stale on the switch (change_password.cgi answers
+        "CHECK HASH FAILED" in that case).
+        """
+        self._client_hash = None
+        self._loaded_switch_metadata = {}
+        with suppress(NetgearPlusPageParserError, PageNotLoadedError):
+            self._get_switch_metadata()
+        if self._client_hash:
+            return
+        if self.switch_model.INITIAL_PASSWORD_HASH_TEMPLATES:
+            try:
+                page = self.fetch_page_from_templates(
+                    self.switch_model.INITIAL_PASSWORD_HASH_TEMPLATES
+                )
+            except PageNotLoadedError:
+                page = None
+            if page is not None:
+                with suppress(NetgearPlusPageParserError):
+                    self._client_hash = self._page_parser.parse_initial_password_hash(
+                        page
+                    )
+        if not self._client_hash:
+            message = (
+                "Could not obtain client hash for password change "
+                "(neither dashboard nor factory fallback yielded one)."
+            )
+            raise RuntimeError(message)
+
+    def change_password(self, old_password: str, new_password: str) -> bool:
+        """
+        Change the admin password.
+
+        On success the switch invalidates the current session; this
+        method updates the connector's stored password so the next call
+        triggers an automatic re-login with the new password.
+
+        Works both on a normally configured switch (hash read from
+        dashboard.cgi) and on a factory-state switch (hash read from
+        the changeDefPwdCk.cgi iframe shown on /index.cgi).
+        """
+        if not self.switch_model.PASSWORD_CHANGE_TEMPLATES:
+            message = "Password change is not supported on this model"
+            raise NotImplementedError(message)
+
+        self._ensure_password_change_hash()
+
+        for template in self.switch_model.PASSWORD_CHANGE_TEMPLATES:
+            url = template["url"].format(ip=self.host)
+            method = template["method"]
+            data = self.switch_model.get_password_change_data(
+                old_password, new_password
+            )
+            self._page_fetcher.set_data_from_template(template, self, data)
+            headers = self._resolve_template_headers(template)
+
+            response = BaseResponse
+            try:
+                response = self._page_fetcher.request(
+                    method, url, data, headers=headers
+                )
+            except NotLoggedInError as error:
+                if self.get_login_cookie():
+                    response = self._page_fetcher.request(
+                        method, url, data, headers=headers
+                    )
+                else:
+                    message = "Not logged in and unable to login."
+                    raise LoginFailedError(message) from error
+
+            body = response.content
+            if isinstance(body, bytes):
+                body = body.decode(errors="replace")
+            body_stripped = (body or "").strip()
+            if (
+                self._page_fetcher.has_ok_status(response)
+                and body_stripped == "SUCCESS"
+            ):
+                self._password = new_password
+                self._client_hash = None
+                self._loaded_switch_metadata = {}
+                return True
+            if body_stripped == "INCORRECT":
+                message = "Old password is incorrect"
+                raise LoginFailedError(message)
+            _LOGGER.warning(
+                "NetgearSwitchConnector.change_password response was %s",
+                body_stripped,
+            )
+        return False
+
+    def _diff_desired_vlans(
+        self,
+        desired_vlans: dict,
+        current_vlans: dict,
+        summary: dict[str, list],
+    ) -> list[tuple]:
+        """Issue add_vlan calls and return list of pending edits."""
+        edits_pending: list[tuple] = []
+        for vlan_id, spec in desired_vlans.items():
+            name = spec.get("name")
+            ports_config = _normalize_ports(spec["ports_config"])
+            voice_vlan = bool(spec.get("voice_vlan", False))
+            voice_cos = int(spec.get("voice_cos", 6))
+
+            if vlan_id not in current_vlans:
+                ok = self.add_vlan(vlan_id, name, ports_config, voice_vlan, voice_cos)
+                _record(summary, ok, "added", vlan_id, "add")
+                continue
+
+            cur = current_vlans[vlan_id]
+            cur_ports = _cfg_to_ports_string(cur["cfg"])
+            if cur.get("name") != name or cur_ports != ports_config:
+                edits_pending.append(
+                    (vlan_id, name, ports_config, voice_vlan, voice_cos)
+                )
+            else:
+                summary["skipped"].append(vlan_id)
+        return edits_pending
+
+    def _apply_pvids(
+        self,
+        desired_pvids: dict,
+        current_ports: dict,
+        summary: dict[str, list],
+    ) -> None:
+        for port, vlan_id in desired_pvids.items():
+            current_pvid = current_ports.get(port, {}).get("pvid")
+            if current_pvid == vlan_id:
+                continue
+            ok = self.set_vlan_pvid(port, vlan_id)
+            _record(summary, ok, "pvids_set", (port, vlan_id), "pvid")
+
+    def _strict_remove(
+        self,
+        desired_vlans: dict,
+        current_vlans: dict,
+        summary: dict[str, list],
+    ) -> None:
+        for vlan_id in list(current_vlans):
+            if vlan_id in desired_vlans:
+                continue
+            if vlan_id == 1 and 1 not in desired_vlans:
+                summary["skipped"].append(vlan_id)
+                continue
+            ok = self.remove_vlan(vlan_id)
+            _record(summary, ok, "removed", vlan_id, "remove")
+
+    def apply_vlan_config(
+        self,
+        config: dict,
+        *,
+        strict: bool = False,
+    ) -> dict:
+        """
+        Reconcile switch VLAN state against a desired config.
+
+        Expected keys:
+            mode (str): required, e.g. "adv8021Q"
+            vlans (dict[int, dict]): id -> {name, ports_config,
+                voice_vlan?, voice_cos?}
+            pvids (dict[int, int]): port -> vlan_id
+
+        strict=True removes VLANs not listed (except VLAN 1 unless
+        the user lists it).
+
+        Operation order is add → pvid → edit → remove to avoid a
+        switch quirk that silently drops an edit excluding a port
+        whose PVID still points to that VLAN.
+        """
+        desired_mode = config.get("mode")
+        if not desired_mode:
+            message = "config['mode'] is required"
+            raise ValueError(message)
+
+        desired_vlans = config.get("vlans") or {}
+        desired_pvids = config.get("pvids") or {}
+
+        current = self.vlan_status()
+        if current.get("mode") != desired_mode:
+            if not self.set_vlan_mode(desired_mode):
+                message = f"Failed to set VLAN mode to {desired_mode!r}"
+                raise RuntimeError(message)
+            current = self.vlan_status()
+        current_vlans = current.get("vlans") or {}
+        current_ports = current.get("ports") or {}
+
+        summary: dict[str, list] = {
+            "added": [],
+            "edited": [],
+            "removed": [],
+            "pvids_set": [],
+            "skipped": [],
+            "failed": [],
+        }
+
+        edits_pending = self._diff_desired_vlans(desired_vlans, current_vlans, summary)
+        self._apply_pvids(desired_pvids, current_ports, summary)
+        for vlan_id, name, ports_config, voice_vlan, voice_cos in edits_pending:
+            ok = self.edit_vlan(vlan_id, name, ports_config, voice_vlan, voice_cos)
+            _record(summary, ok, "edited", vlan_id, "edit")
+        if strict:
+            self._strict_remove(desired_vlans, current_vlans, summary)
+
+        return summary
+
+    def fetch_page(
+        self,
+        method: str,
+        url: str,
+        data: dict,
+        headers: dict[str, str] | None = None,
+    ) -> Response | BaseResponse:
         """Fetch url and retry when first response is a redirect to the login page."""
         response = BaseResponse()
         if not self.get_offline_mode():
             for attempt in range(2):
                 try:
-                    response = self._page_fetcher.request(method, url, data)
+                    response = self._page_fetcher.request(
+                        method, url, data, headers=headers
+                    )
                     break  # Exit the loop if the request is successful
                 except NotLoggedInError as error:
                     if attempt == 0 and self.get_login_cookie():
@@ -561,19 +1133,55 @@ class NetgearSwitchConnector:
         return response
 
     def fetch_page_from_templates(self, templates: list) -> Response | BaseResponse:
-        """Return response for 1st successful request from templates."""
-        response = BaseResponse()
-        for template in templates:
-            url = template["url"].format(ip=self.host)
-            method = template["method"]
-            data = {}
-            if not self.get_offline_mode():
-                self._page_fetcher.set_data_from_template(template, self, data)
-            response = self.fetch_page(method, url, data)
-            if self._page_fetcher.has_ok_status(response):
-                return response
+        """
+        Return response for 1st successful request from templates.
+
+        Retries once if every template fails. A timeout-shaped failure
+        (no status_code, empty body) gets a short backoff and a plain
+        re-fetch (no re-login). A non-timeout failure attempts
+        ``get_login_cookie`` first in case the SID was invalidated.
+        """
+
+        def attempt() -> Response | BaseResponse:
+            last: Response | BaseResponse = BaseResponse()
+            for template in templates:
+                url = template["url"].format(ip=self.host)
+                method = template["method"]
+                data: dict = {}
+                if not self.get_offline_mode():
+                    self._page_fetcher.set_data_from_template(template, self, data)
+                headers = self._resolve_template_headers(template)
+                last = self.fetch_page(method, url, data, headers=headers)
+                if self._page_fetcher.has_ok_status(last):
+                    return last
+            return last
+
+        result = attempt()
+        if self._page_fetcher.has_ok_status(result):
+            return result
+
+        looks_like_timeout = getattr(
+            result, "status_code", None
+        ) is None and not getattr(result, "content", None)
+        if self.get_offline_mode():
+            pass
+        elif looks_like_timeout:
+            time.sleep(self.RETRY_BACKOFF_SECONDS)
+            result = attempt()
+        elif self.get_login_cookie():
+            result = attempt()
+        if self._page_fetcher.has_ok_status(result):
+            return result
+
         message = f"Failed to load any page of templates: {templates}"
         raise PageNotLoadedError(message)
+
+    def _resolve_template_headers(self, template: dict) -> dict[str, str] | None:
+        """Format header values with {ip} so templates can carry e.g. Referer."""
+        headers = template.get("headers")
+        if not headers:
+            return None
+        return {k: v.format(ip=self.host) for k, v in headers.items()}
 
     def get_switch_infos(self) -> dict[str, Any]:
         """Return dict with all available statistics."""

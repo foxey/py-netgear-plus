@@ -312,13 +312,14 @@ class PageFetcher:
                 return False
         return True
 
-    def request(
+    def request(  # noqa: PLR0913
         self,
         method: str,
         url: str,
         data: Any = None,
         timeout: int = 0,
         allow_redirects: bool = False,  # noqa: FBT001, FBT002
+        headers: dict[str, str] | None = None,
     ) -> Response | BaseResponse:
         """Make authenticated requests with requests.request."""
         if self.offline_mode:
@@ -366,6 +367,8 @@ class PageFetcher:
                 "allow_redirects": allow_redirects,
                 "timeout": timeout,
             }
+        if headers:
+            kwargs["headers"] = headers
             _LOGGER.debug(
                 "[PageFetcher.request] calling %s %s without cookie"
                 " with %s=%s, allow_redirects=%s, timeout=%d",
