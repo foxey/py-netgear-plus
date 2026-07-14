@@ -18,6 +18,9 @@ Commands:
     parse             Parse collected pages and save data to a file.
     save              Save pages retrieved from the switch to a file.
     version           Display the CLI version.
+    vlan              Manage VLAN configuration (sub: status/mode/add/edit/
+                        remove/pvid/apply).
+    led               Control front panel LEDs (sub: on/off/status).
 
 Options:
     --password, -P    Specify the password for the switch. If not provided,
@@ -126,6 +129,11 @@ def main() -> None:
         "save": save_command,
         "status": status_command,
         "version": version_command,
+        "vlan": vlan_command,
+        "port": port_command,
+        "network": network_command,
+        "password": password_command,
+        "led": led_command,
     }
 
     if args.command in command_functions:
@@ -201,7 +209,89 @@ def parse_commandline() -> argparse.ArgumentParser:
     subparsers.add_parser("status", help="Display switch status")
     subparsers.add_parser("version", help="Display CLI version")
 
+    _add_vlan_subparser(subparsers)
+    _add_port_subparser(subparsers)
+    _add_network_subparser(subparsers)
+    _add_password_subparser(subparsers)
+    _add_led_subparser(subparsers)
+
     return parser
+
+
+def _add_led_subparser(subparsers: argparse._SubParsersAction) -> None:
+    led_parser = subparsers.add_parser("led", help="Front panel LED control")
+    led_sub = led_parser.add_subparsers(dest="led_action")
+    led_sub.add_parser("on", help="Turn on front panel LEDs")
+    led_sub.add_parser("off", help="Turn off front panel LEDs")
+    led_sub.add_parser("status", help="Show front panel LED status")
+
+
+def _add_password_subparser(subparsers: argparse._SubParsersAction) -> None:
+    pw_parser = subparsers.add_parser("password", help="Change admin password")
+    pw_parser.add_argument("old", help="Current admin password")
+    pw_parser.add_argument("new", help="New admin password")
+
+
+def _add_vlan_subparser(subparsers: argparse._SubParsersAction) -> None:
+    vlan_parser = subparsers.add_parser("vlan", help="VLAN management")
+    vlan_sub = vlan_parser.add_subparsers(dest="vlan_action")
+    vlan_sub.add_parser("status", help="Show VLAN status")
+    vlan_mode_parser = vlan_sub.add_parser("mode", help="Set VLAN mode")
+    vlan_mode_parser.add_argument(
+        "mode",
+        choices=["noVlan", "bscPotBsd", "advPotBsd", "bsc8021Q", "adv8021Q"],
+    )
+    for verb in ("add", "edit"):
+        sp = vlan_sub.add_parser(verb, help=f"{verb.capitalize()} a VLAN")
+        sp.add_argument("vlan_id", type=int)
+        sp.add_argument("name")
+        sp.add_argument(
+            "ports",
+            help=(
+                "Port membership string, e.g. 'TUUUUUUE' "
+                "(T=Tagged, U=Untagged, E=Excluded)"
+            ),
+        )
+        sp.add_argument("--voice", action="store_true", help="Mark as voice VLAN")
+        sp.add_argument("--voice-cos", type=int, default=6)
+    vlan_remove_parser = vlan_sub.add_parser("remove", help="Delete a VLAN")
+    vlan_remove_parser.add_argument("vlan_id", type=int)
+    vlan_pvid_parser = vlan_sub.add_parser("pvid", help="Set port PVID")
+    vlan_pvid_parser.add_argument("port", type=int)
+    vlan_pvid_parser.add_argument("vlan_id", type=int)
+    vlan_apply_parser = vlan_sub.add_parser(
+        "apply", help="Apply a VLAN config from a JSON file"
+    )
+    vlan_apply_parser.add_argument("file")
+    vlan_apply_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Remove VLANs not listed in the config (except VLAN 1)",
+    )
+
+
+def _add_port_subparser(subparsers: argparse._SubParsersAction) -> None:
+    port_parser = subparsers.add_parser("port", help="Port management")
+    port_sub = port_parser.add_subparsers(dest="port_action")
+    port_sub.add_parser("list", help="Show per-port settings")
+    port_rename = port_sub.add_parser("rename", help="Rename a port")
+    port_rename.add_argument("port", type=int)
+    port_rename.add_argument("name")
+
+
+def _add_network_subparser(subparsers: argparse._SubParsersAction) -> None:
+    net_parser = subparsers.add_parser("network", help="IP/DHCP management")
+    net_sub = net_parser.add_subparsers(dest="network_action")
+    net_sub.add_parser("show", help="Show IP/DHCP configuration")
+    net_set = net_sub.add_parser("set", help="Apply IP/DHCP configuration")
+    net_mode = net_set.add_mutually_exclusive_group(required=True)
+    net_mode.add_argument("--dhcp", action="store_true", help="Use DHCP")
+    net_mode.add_argument(
+        "--static",
+        nargs=3,
+        metavar=("IP", "MASK", "GATEWAY"),
+        help="Static IP / subnet mask / gateway",
+    )
 
 
 def command_chooser(
@@ -390,6 +480,294 @@ def version_command() -> bool:
     """Display CLI version."""
     print(f"Netgear Plus CLI version: {ngp_version}")  # noqa: T201
     return True
+
+
+def _vlan_prepare(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Load cookie + autodetect + fetch metadata for VLAN actions."""
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_vlan_support():
+        print(  # noqa: T201
+            f"VLAN management not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    if args.vlan_action != "status":
+        connector._get_switch_metadata()  # noqa: SLF001
+    return True
+
+
+def vlan_command(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Dispatch VLAN subcommands."""
+    if not args.vlan_action:
+        print("vlan: missing subcommand", file=stderr)  # noqa: T201
+        return False
+
+    if not _vlan_prepare(connector, args):
+        return False
+
+    try:
+        return _vlan_dispatch(connector, args)
+    except NotImplementedError as exc:
+        model = getattr(connector.switch_model, "MODEL_NAME", "<unknown>")
+        print(f"VLAN not supported on {model}: {exc}", file=stderr)  # noqa: T201
+        return False
+
+
+def _vlan_dispatch(  # noqa: PLR0911, PLR0912
+    connector: NetgearSwitchConnector, args: argparse.Namespace
+) -> bool:
+    """Run the VLAN subcommand chosen via args.vlan_action."""
+    action = args.vlan_action
+    if action == "status":
+        status = connector.vlan_status()
+        if args.json:
+            print(json.dumps(status, indent=4, default=str))  # noqa: T201
+        else:
+            print(f"Mode: {status['mode']}")  # noqa: T201
+            print("VLANs:")  # noqa: T201
+            for vid, v in status.get("vlans", {}).items():
+                print(f"  {vid}: {v.get('name')} members={v.get('members')}")  # noqa: T201
+            print("Ports:")  # noqa: T201
+            for p, info in status.get("ports", {}).items():
+                pretty_vlans = {
+                    vid: m.name.capitalize() for vid, m in info.get("vlans", {}).items()
+                }
+                print(  # noqa: T201
+                    f"  {p}: pvid={info.get('pvid')} vlans={pretty_vlans}"
+                )
+        return True
+
+    if action == "mode":
+        return connector.set_vlan_mode(args.mode)
+
+    if action == "add":
+        return connector.add_vlan(
+            args.vlan_id, args.name, args.ports, args.voice, args.voice_cos
+        )
+
+    if action == "edit":
+        return connector.edit_vlan(
+            args.vlan_id, args.name, args.ports, args.voice, args.voice_cos
+        )
+
+    if action == "remove":
+        return connector.remove_vlan(args.vlan_id)
+
+    if action == "pvid":
+        return connector.set_vlan_pvid(args.port, args.vlan_id)
+
+    if action == "apply":
+        path = Path(args.file)
+        if not path.exists():
+            print(f"File not found: {args.file}", file=stderr)  # noqa: T201
+            return False
+        with path.open() as f:
+            cfg = json.load(f)
+        # JSON keys are strings; coerce VLAN/port keys to int.
+        if "vlans" in cfg:
+            cfg["vlans"] = {int(k): v for k, v in cfg["vlans"].items()}
+        if "pvids" in cfg:
+            cfg["pvids"] = {int(k): int(v) for k, v in cfg["pvids"].items()}
+        summary = connector.apply_vlan_config(cfg, strict=args.strict)
+        print(json.dumps(summary, indent=4, default=str))  # noqa: T201
+        return True
+
+    print(f"Unknown vlan action: {action}", file=stderr)  # noqa: T201
+    return False
+
+
+def port_command(  # noqa: PLR0911
+    connector: NetgearSwitchConnector, args: argparse.Namespace
+) -> bool:
+    """Dispatch port subcommands."""
+    if not args.port_action:
+        print("port: missing subcommand", file=stderr)  # noqa: T201
+        return False
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_port_naming():
+        print(  # noqa: T201
+            f"Port naming not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    connector._get_switch_metadata()  # noqa: SLF001
+    try:
+        if args.port_action == "list":
+            settings = connector.get_port_settings()
+            if args.json:
+                print(json.dumps(settings, indent=4, default=str))  # noqa: T201
+            else:
+                for p, s in settings.items():
+                    print(  # noqa: T201
+                        f"  {p}: name='{s['name']}' speed={s['speed']} "
+                        f"ingress={s['ingress_rate']} egress={s['egress_rate']} "
+                        f"flow_ctrl={s['flow_control']}"
+                    )
+            return True
+        if args.port_action == "rename":
+            return connector.set_port_name(args.port, args.name)
+    except NotImplementedError as exc:
+        model = connector.switch_model.MODEL_NAME
+        print(f"Port op not supported on {model}: {exc}", file=stderr)  # noqa: T201
+        return False
+    print(f"Unknown port action: {args.port_action}", file=stderr)  # noqa: T201
+    return False
+
+
+def network_command(  # noqa: PLR0911, PLR0912
+    connector: NetgearSwitchConnector, args: argparse.Namespace
+) -> bool:
+    """Dispatch network subcommands."""
+    if not args.network_action:
+        print("network: missing subcommand", file=stderr)  # noqa: T201
+        return False
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_ip_config():
+        print(  # noqa: T201
+            f"Network config not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    if args.network_action == "set":
+        connector._get_switch_metadata()  # noqa: SLF001
+    try:
+        if args.network_action == "show":
+            cfg = connector.get_ip_config()
+            if args.json:
+                print(json.dumps(cfg, indent=4))  # noqa: T201
+            else:
+                mode = "DHCP" if cfg["dhcp"] else "Static"
+                print(  # noqa: T201
+                    f"mode={mode} ip={cfg['ip_address']} "
+                    f"mask={cfg['subnet_mask']} gw={cfg['gateway']}"
+                )
+            return True
+        if args.network_action == "set":
+            target_ip = None if args.dhcp else args.static[0]
+            if args.dhcp:
+                result = connector.set_ip_config(dhcp=True)
+            else:
+                ip, mask, gw = args.static
+                result = connector.set_ip_config(
+                    dhcp=False,
+                    ip_address=ip,
+                    subnet_mask=mask,
+                    gateway=gw,
+                )
+            current_host = connector.host
+            if target_ip and target_ip != current_host:
+                print(  # noqa: T201
+                    f"Note: switch IP changed to {target_ip}. The current "
+                    f"TCP session was torn down so the result above may "
+                    f"read False even on success. Run "
+                    f"`ngp-cli login {target_ip}` to re-establish access.",
+                    file=stderr,
+                )
+            elif args.dhcp:
+                print(  # noqa: T201
+                    "Note: DHCP enabled. If the lease yields a different "
+                    "IP, the current session is torn down; ping the new "
+                    "address and `ngp-cli login <new_ip>` to reconnect.",
+                    file=stderr,
+                )
+            return result
+    except NotImplementedError as exc:
+        print(  # noqa: T201
+            f"Network op not supported on {connector.switch_model.MODEL_NAME}: {exc}",
+            file=stderr,
+        )
+        return False
+    print(  # noqa: T201
+        f"Unknown network action: {args.network_action}", file=stderr
+    )
+    return False
+
+
+def led_command(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Dispatch front panel LED subcommands."""
+    if not args.led_action:
+        print("led: missing subcommand", file=stderr)  # noqa: T201
+        return False
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_led_switch():
+        print(  # noqa: T201
+            f"LED control not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    if args.led_action == "status":
+        switch_infos = connector.get_switch_infos()
+        status = switch_infos.get("led_status", "unknown")
+        print(f"LED status: {status}")  # noqa: T201
+        return True
+    connector._get_switch_metadata()  # noqa: SLF001
+    return connector.switch_leds(args.led_action)
+
+
+def password_command(
+    connector: NetgearSwitchConnector, args: argparse.Namespace
+) -> bool:
+    """
+    Change the admin password.
+
+    Takes the current and new passwords as positional arguments. The
+    current password is independent of the --password/NETGEAR_PLUS_PASSWORD
+    auth credential used to establish the session.
+    """
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    if not connector.switch_model.has_password_change():
+        print(  # noqa: T201
+            f"Password change not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+    # Ensure the soft-auth re-login fallback uses the current password.
+    connector._password = args.old  # noqa: SLF001
+    try:
+        ok = connector.change_password(args.old, args.new)
+    except LoginFailedError as exc:
+        print(f"Password change rejected: {exc}", file=stderr)  # noqa: T201
+        return False
+    if ok:
+        print("Password changed. Session invalidated; run `ngp-cli login` again.")  # noqa: T201
+        if Path(COOKIE_FILE).exists():
+            Path(COOKIE_FILE).unlink()
+    return ok
 
 
 if __name__ == "__main__":
