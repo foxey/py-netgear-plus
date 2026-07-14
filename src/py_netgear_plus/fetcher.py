@@ -3,9 +3,10 @@
 import json
 import logging
 import re
+from collections.abc import Iterator
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import requests
 import requests.cookies
@@ -208,10 +209,15 @@ class PageFetcher:
         # endpoint needs authentication. Treat that as unauthorized so callers
         # retry after JSON REST login.
         err_code = body.get("errCode")
-        if request_data is None and not self._bearer_token and err_code not in (
-            None,
-            0,
-            "0",
+        if (
+            request_data is None
+            and not self._bearer_token
+            and err_code
+            not in (
+                None,
+                0,
+                "0",
+            )
         ):
             _LOGGER.debug(
                 "[PageFetcher.json_request] JSON API endpoint %s returned errCode=%s "
