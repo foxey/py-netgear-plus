@@ -1360,11 +1360,14 @@ class JGSxxxSeries(PageParser):
         status_by_port = {}
         for status in result:
             port_nr = int(status[0]) + 1
-            modus_speed_text = status[1].split("?")[3]
-            port_state_text = status[1].split("?")[2]
-            connection_speed_text = strip_duplex(status[1].split("?")[4])
+            fields = status[1].split("?")
+            description_text = fields[1].strip() or None
+            port_state_text = fields[2]
+            modus_speed_text = fields[3]
+            connection_speed_text = strip_duplex(fields[4])
 
             status_by_port[port_nr] = {
+                "description": description_text,
                 "status": port_state_text,
                 "modus_speed": modus_speed_text,
                 "connection_speed": connection_speed_text,
