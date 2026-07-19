@@ -1440,6 +1440,14 @@ class GS116Ev2(JGSxxxSeries):
         super().__init__()
 
 
+class JGS524PE(JGSxxxSeries):
+    """Parser for the JGS524PE switch."""
+
+    def __init__(self) -> None:
+        """Initialize the JGS524PE parser."""
+        super().__init__()
+
+
 class GSS108E(PageParser):
     """Parser for the GSS108E switch."""
 
