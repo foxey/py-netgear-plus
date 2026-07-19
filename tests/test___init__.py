@@ -24,6 +24,7 @@ from py_netgear_plus.models import (
     GS316EPP,
     GSS108E,
     JGS516PE,
+    JGS524PE,
     MS305E,
     MS308E,
     XS512EM,
@@ -82,6 +83,12 @@ MODEL_PARAMETERS = [
         "<html></html>",
     ),
     (
+        JGS524PE,
+        None,
+        "26fe7cce1e480dd05e7f76155579d3ed",
+        "<html></html>",
+    ),
+    (
         XS512EM,
         "1113244551",
         "6ca0965e7a44ee17eec5d575c8c56dd8",
@@ -106,6 +113,7 @@ MODELS_FOR_GET_SWITCH_INFOS = [
     GS316EPP,
     JGS516PE,
     JGS524Ev2,
+    JGS524PE,
     XS512EM,
     GSS108E,
 ]

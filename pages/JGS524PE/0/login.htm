@@ -1,0 +1,340 @@
+﻿<!DOCTYPE html>
+<html>
+	<head><meta name="format-detection" content="telephone=no,email=no,address=no">
+	<meta content="text/html; charset=utf-8" http-equiv="Content-Type" >
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" >
+	<link href="css/basic_layout.css" rel="stylesheet" type="text/css">
+	<link type="text/css" href="css/func_page_layout.css" rel="stylesheet">
+    <link type="image/x-icon" href="images/favicon.ico" rel="shortcut icon"/>
+<script type="text/javascript">
+var multiLangCfg = 'enu';var sysGeneInfor = 'JGS524PE?switch cellar?28:80:88:da:65:e6?2.6.0.50?Enable?192.168.1.139?255.255.255.0?192.168.1.1?3KL98C5F0002B';var productName = sysGeneInfor.split('?')[0];var fwVer = sysGeneInfor.split('?')[3];var jsPath = 'JGS524PE';document.write("<script type='text/javascript' src='"+jsPath+"/enu.js?"+fwVer+"' charset='utf-8'><\/script>");document.write("<script type='text/javascript' src='"+jsPath+"/md5.js?"+fwVer+"' charset='utf-8'><\/script>");</script>
+<script>
+    document.write("<script type='text/javascript' src='"+jsPath+"/jsFuncs.js?"+fwVer+"' charset='utf-8'><\/script>");
+    document.write("<script type='text/javascript' src='"+jsPath+"/help_desc.js?"+fwVer+"' charset='utf-8'><\/script>");
+    document.write("<script type='text/javascript' src='"+jsPath+"/md5.js?"+fwVer+"' charset='utf-8'><\/script>");
+	document.write("<title>NETGEAR "+productName+"</title>");
+</script>
+	<style type="text/css">
+		.login_contenter{margin:0 auto;width:498px; min-height: 145px;}
+		.login_area{text-align:left;width:498px;height:117px;border:1px #e7e5e4 solid;font-size:12pt; font-family:Arial;}
+		.textInputLength{width:290px;}
+		.mTop25{margin-top:25px;}.mTop70{margin-top:70px;}
+		.tableData_ui{width:500px; overflow:auto; max-height:145px; overflow-x:hidden; font-size:13pt; font-family:Arial;}
+		.tableData_ui table{width:500px; max-height:145px;}
+		.tableData_ui table td{/*padding:2px 2px 2px 2px;*/}
+		.pwdErrStyle{height:13px; font-size: 10pt; font-family: Arial; color: #CC0000;}
+		.factGraph{float:left;position:absolute;margin-left: 175px;}
+		.customGraph{float:left;position:absolute;margin-top:19px;margin-left:0px;}
+		.switchInfo{float:left;position:absolute;margin-top:58px;font-size: 11pt;color:#82786e;font-family:Arial;font-weight:bold; min-width: 480px;}
+		.footerImg{height: 139px;}
+		/* Custom */
+		/* Block UI */
+        .loginBlkArea_ui{
+            width:100%; /*border:1px red solid;*/
+        }
+
+        /* Title Area */
+        .loginBlkArea_ui div.tClass {
+            width:100%;	/*height:25px;*/ border-bottom:1px #672e8f solid; /*line-height:16px; border:1px red solid;*/ padding:0; display: inline-block;
+        }
+
+        /* Title div */
+        .loginBlkArea_ui div.tClass div {
+            font-family:Arial, Helvetica, sans-srif; font-size:14pt; color:#672e8f; border-bottom:3px #672e8f solid; display: inline-block; padding-bottom:4px; 
+            /*line-height:22px; border:1px red solid;*/
+        }
+
+        /* Help icon */
+        .loginBlkArea_ui div.tClass img {
+            float:right; line-height:20px; /*border:1px red solid;*/ margin-top:10px;
+        }
+
+        .loginBlkArea_ui div.tClass img:hover {
+            cursor:pointer;
+        }
+
+        /* Body Area */
+        .loginBlkArea_ui div.bClass {
+            margin-top:4px; font-size:10pt; color:#666; text-align:center; width:746px;
+        }
+        .copyrightGraphWrap
+	    {
+	    	float: left;
+		    height: 139px;
+		    font-family: Arial;
+		    font-size: 9pt;
+		    color: #b2a79f;
+		    margin-left: 25px;
+		    margin-right: 25px;
+		    display: inline-block;
+	    }
+	    
+	    .copyrightGraphWrap span
+	    {
+	    	display: inline-block;
+	    	vertical-align: bottom;
+	    	line-height: 16px;
+	    	margin-top: 118px;
+	    }
+	</style>
+<script type="text/javascript">
+var portNum = 24;var sysGeneInfor = 'JGS524PE?switch cellar?28-80-88-da-65-e6?2.6.0.50?Enable?192.168.1.139?255.255.255.0?192.168.1.1?3KL98C5F0002B?0?disabled';var productName = sysGeneInfor.split('?')[0];
+var customerImg = 'images/Netgear.png';
+var titleImg = 'images/Main_Facet_Graphic.png';
+var helpIcon = 'images/icon_help_contentlevel.png';
+var footerIcon = 'images/Footer_Facet_Graphic.png';
+var logoutIcon = 'images/icon_logout.png';
+var icon_alert = 'images/icon_alert.png';
+	
+var pgtopImgPath = new Array();
+var pgtopImg = new Array();
+pgtopImgPath = [
+    "images/PG_Top_Checkmark_Hover.jpg",
+    "images/PG_Top_Checkmark.jpg",
+    "images/PG_Top_Normal_Hover.jpg",
+    "images/PG_Top_Normal.jpg",
+    "images/PG_Top_Tagged_Hover.jpg",
+    "images/PG_Top_Tagged.jpg",
+    "images/PG_Top_Untagged_Hover.jpg",
+    "images/PG_Top_Untagged.jpg"
+];
+
+for(i = 0; i < pgtopImgPath.length; i++)
+{
+    pgtopImg[i] = new Image();
+    pgtopImg[i].src = pgtopImgPath[i];
+}
+function CalcMD5PW()
+{
+    var count    = 0;
+    var space    = "\0";
+    var md5Key   = "YOU_CAN_NOT_PASS";
+    var password = document.getElementById("passwordtmp").value;
+    var passwrd;
+    var encryPw;
+
+    while (count <= (2048 - (password.length + 1))) {
+      if (count === 0) {
+        passwrd = password;
+      } else {
+        passwrd += password;
+      }
+      passwrd += space;
+      count += (password.length + 1);
+    }
+
+    while (count < 2048) {
+      passwrd += space;
+      count += 1;
+    }
+
+    encryPw = hex_hmac_md5(md5Key, passwrd);
+
+    document.getElementById("password").value = encryPw;
+    document.getElementById('passwordtmp').disabled = true;
+}
+function submitForm() 
+{
+    CalcMD5PW();
+	document.getElementById('formArea').submit();
+}
+
+function init()
+{
+	var url = window.location.toString();
+	
+	if (url.indexOf("?")!= -1)
+	{
+		var ary = url.split("?")[1];	
+		
+		if (ary != "")
+		{
+			document.getElementById('pwdErr').innerHTML = '<img src="' + icon_alert+'"/>&nbsp;'+ErrorCode0033;
+		}
+	}
+	
+	window.onresize = autoResizeElement;
+    autoResizeElement();
+    
+    //
+    var body_height = (window.innerHeight - 2) || (document.getElementsByTagName('html')[0].offsetHeight - 6);
+    // Update min-width of HTML
+    //document.getElementsByTagName('html')[0].setAttribute('style', 'overflow: auto;min-height: ' + body_height + 'px; min-width: 670px;');
+
+    /* delete all cookie for multi-lang */
+    deleteMultiLangCookies();
+}
+
+//
+function autoResizeElement()
+{
+    var body_height = (window.innerHeight - 2) || (document.getElementsByTagName('html')[0].offsetHeight - 6);
+    var body_width = (window.innerWidth) || (document.getElementsByTagName('html')[0].offsetWidth);
+    
+    document.getElementById('mainArea').setAttribute('style', 'height: '+ body_height + 'px; min-height: 768px;');
+    // login container
+    var loginContainerHeight = body_height - 87 - 139;
+    
+    if(body_width < 991){
+       loginContainerHeight -= 16;
+    }
+    
+    document.getElementById('login_contenter').setAttribute('style', 'height:' + (loginContainerHeight - 93) + 'px; padding-top:93px; min-height: 454px;');
+    document.getElementsByTagName('html')[0].setAttribute('style', 'overflow: auto; min-height:768px;  min-width: 941px');
+}
+
+function disableControl()
+{
+    // Disable button on control bar
+    document.getElementById('btnApply').className = 'unclickbtnStyle';
+    document.getElementById('btnApply').setAttribute('href', 'javascript:void(0)');
+}
+function pressPassword()
+{
+    var key = event || window.event;
+    if(key.keyCode == 13)
+    {
+        key.preventDefault();
+        submitForm();
+    }
+    document.getElementById('btnApply').className = 'btnStyleLogin';
+    document.getElementById('btnApply').setAttribute('href', 'javascript:submitForm()');
+}
+var pressCtrl = 0;
+function keyUp(id, e)
+{
+    var key = e || window.event;
+    var keyId = key.keyCode;
+    if(document.getElementById(id).value != '')
+    {
+        // Delete and backspece
+        if(keyId == 8 || keyId == 46)
+        {
+            document.getElementById('btnApply').focus();
+            
+            if(document.getElementById(id).value != '')
+            {
+                document.getElementById('btnApply').className = 'btnStyleLogin';
+                document.getElementById('btnApply').setAttribute('href', 'javascript:submitForm()');
+            }
+            document.getElementById(id).focus();
+        }
+        // Ctrl + v
+        if(keyId == 17)
+        {
+            pressCtrl = 1;
+        }
+        
+        if(pressCtrl == 1 && keyId == 86)
+        {
+            document.getElementById('btnApply').focus();
+            
+            document.getElementById('btnApply').className = 'btnStyleLogin';
+            document.getElementById('btnApply').setAttribute('href', 'javascript:submitForm()');
+            document.getElementById(id).focus();
+            
+            pressCtrl = 0;
+        }
+    }
+}
+
+function deleteMultiLangCookies()
+{
+    deleteCookie("priNavClick");
+    deleteCookie("secNavClick");
+    deleteCookie("treeMenuClick");
+}
+</script>
+</head>
+
+<body onload="init();">
+    <div id="mainArea" class="mainArea">
+        <!-- Title Area -->
+        <div id="mainTitleArea" class="mainTitleArea">
+            <script type="text/javascript">
+                //document.write(createProductTitle());
+                var str = '';
+                str += '<img src="' + customerImg + '" class="customGraph"/>';
+                str += '<img src="' + titleImg + '" class="factGraph"/>';
+                document.write(str);
+
+                if (productName == "JGS516PE")
+                {
+                    str = '<div id="productName" class="switchInfo">' + Model0003 + '</div>'
+                }
+                else if(productName=="GS116Ev2")
+                {
+                    str = '<div id="productName" class="switchInfo">' + Model0004 + '</div>'
+                }
+                else if(productName=="JGS524Ev2")
+                {
+                    str = '<div id="productName" class="switchInfo">' + Model0005 + '</div>'
+                }
+                else if(productName=="JGS524PE")
+                {
+                    str = '<div id="productName" class="switchInfo">' + Model0006 + '</div>'
+                }
+
+                document.write(str);
+            </script>
+        </div>
+        <div id="login_contenter" class="login_contenter">
+			<script type="text/javascript" language='JavaScript'>
+				var data = new Array(), colWidth;
+				
+				// Create Submit form
+				login_contenter.appendChild(createSubmitForm('pwdLogin', 'login.htm', ''));
+				
+				//Create Main Area
+				contentArea.appendChild(createBlkArea('loginBlk', Utility0001, 'loginBlkArea_ui'));
+                document.getElementById('loginBlkTArea').removeChild(document.getElementById('loginBlkHIcon'));
+				
+				document.getElementById('loginBlkBArea').appendChild(createDivEle('loginDiv', '', 'login_area'));
+								
+				// Insert Data
+				// 1. Insert login data table into body area
+				document.getElementById('loginDiv').appendChild(createTableEle('loginTData', 'tableData_ui mTop25'));
+				colWidth = '25px?150px?290px?25px';
+				
+				// 1.1 Password
+				data[0] = createDivEle('emptyDiv1', '', '');
+				data[1] = createDivEle('loginDiv1', Utility0002, 'colInterval textLeft');
+				data[2] = createInputEle('passwordtmp', 'passwordtmp', 'password', '', '', '', 'textInputStyle textInputLength');
+				data[3] = createDivEle('emptyDiv2', '', '');
+				createOneRowEle(0, document.getElementById('loginTData'), data, colWidth, 'borderNone');
+				document.getElementById('passwordtmp').setAttribute('maxlength', '20');
+				document.getElementById('passwordtmp').setAttribute('onkeypress', 'pressPassword()');
+				document.getElementById('passwordtmp').setAttribute('onkeyup', 'keyUp(this.id, event)');
+
+				// 1.2 Error Mesage
+				data[0] = createDivEle('emptyDiv3', '', '');
+				data[1] = createDivEle('emptyDiv4', '', '');	
+				data[2] = createDivEle('pwdErr', '&nbsp;', 'pwdErrStyle');				
+				data[3] = createDivEle('emptyDiv5', '', '');
+				createOneRowEle(1, document.getElementById('loginTData'), data, colWidth, 'borderNone');
+											
+				// Insert Data
+				// 2. Insert login button into body area
+				data[0] = createDivEle('emptyDiv6', '', '');
+				data[1] = createDivEle('emptyDiv7', '', '');	
+				data[2] = createAEle('btnApply', Utility0001, 'submitForm()', 'btnStyleLogin')				
+				data[3] = createDivEle('emptyDiv8', '', '');
+				createOneRowEle(2, document.getElementById('loginTData'), data, colWidth, 'borderNone');
+				//
+				//disableControl();
+                contentArea.appendChild(createInputEle('password', 'password', 'hidden', '', '', '', '' ));
+			</script>
+		</div>
+        <!-- Foort Area -->
+        <div class="footerImg">
+			<script type="text/javascript" language='JavaScript'>
+				var str = '';
+				str += '<div id="copyright" class="copyrightGraphWrap"><span>'+Utility0003+'</span></div>'
+                str += '<img src="' + footerIcon + '" style="float:right;"/>';
+                document.write(str);
+			</script>
+		</div>
+    </div>
+</body>
+
+</html>
