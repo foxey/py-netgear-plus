@@ -2,6 +2,8 @@
 
 import json
 import logging
+import re
+from collections.abc import Iterator
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ from lxml import html
 from requests import Response
 
 from py_netgear_plus.models import (
+    MODELS,
     AutodetectedSwitchModel,
     InvalidCryptFunctionError,
     SwitchModelNotDetectedError,
@@ -26,6 +29,23 @@ status_code_no_response = requests.codes.no_response
 status_code_unauthorized = requests.codes.unauthorized
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _normalize_model_identifier(value: Any) -> str:
+    """Return a compact comparable model identifier."""
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def _iter_json_values(value: Any) -> Iterator[Any]:
+    """Yield scalar values from a nested JSON-like structure."""
+    if isinstance(value, dict):
+        for nested_value in value.values():
+            yield from _iter_json_values(nested_value)
+    elif isinstance(value, list):
+        for nested_value in value:
+            yield from _iter_json_values(nested_value)
+    elif value is not None:
+        yield value
 
 
 class PageFetcherConnectionError(Exception):
@@ -165,6 +185,110 @@ class PageFetcher:
         """Clear Bearer token."""
         self._bearer_token = None
 
+    def _parse_json_body(
+        self, response: Response | BaseResponse
+    ) -> dict[str, Any] | None:
+        """Return response JSON when it is a dictionary."""
+        try:
+            body = response.json()
+        except (AttributeError, ValueError):
+            return None
+        if not isinstance(body, dict):
+            return None
+        return body
+
+    def _prepare_json_response(
+        self, url: str, response: Response | BaseResponse, request_data: Any = None
+    ) -> None:
+        """Prepare JSON API responses for login retry and model detection."""
+        body = self._parse_json_body(response)
+        if body is None:
+            return
+
+        # Some MS-series firmware returns HTTP 200 with an error payload when an
+        # endpoint needs authentication. Treat that as unauthorized so callers
+        # retry after JSON REST login.
+        err_code = body.get("errCode")
+        if (
+            request_data is None
+            and not self._bearer_token
+            and err_code
+            not in (
+                None,
+                0,
+                "0",
+            )
+        ):
+            _LOGGER.debug(
+                "[PageFetcher.json_request] JSON API endpoint %s returned errCode=%s "
+                "without a bearer token; retrying after login.",
+                url,
+                err_code,
+            )
+            response.status_code = status_code_unauthorized
+            return
+
+        self._normalize_json_status_model(url, response, body)
+
+    def _normalize_json_status_model(
+        self, url: str, response: Response | BaseResponse, body: dict[str, Any]
+    ) -> None:
+        """Normalize JSON REST status model info for autodetection."""
+        if "/api/system/status" not in url:
+            return
+
+        system_info = body.get("systemInfo")
+        if not isinstance(system_info, dict):
+            system_info = {}
+            body["systemInfo"] = system_info
+
+        candidate_values = [
+            system_info.get("modelNumber"),
+            system_info.get("modelName"),
+            system_info.get("productName"),
+            body.get("modelNumber"),
+            body.get("modelName"),
+            body.get("productName"),
+            body.get("deviceName"),
+        ]
+        candidate_values.extend(_iter_json_values(body))
+
+        json_api_models = []
+        for mdl_cls in MODELS:
+            mdl = mdl_cls()
+            if getattr(mdl, "API_TYPE", "") == "json_rest":
+                json_api_models.append(mdl)
+
+        for candidate_value in candidate_values:
+            normalized_candidate = _normalize_model_identifier(candidate_value)
+            if not normalized_candidate:
+                continue
+            for model in json_api_models:
+                normalized_model = _normalize_model_identifier(model.MODEL_NAME)
+                if normalized_model and normalized_model in normalized_candidate:
+                    if system_info.get("modelNumber") != model.MODEL_NAME:
+                        _LOGGER.debug(
+                            "[PageFetcher.json_request] Normalized JSON REST model "
+                            "value %r to %s for IP=%s",
+                            candidate_value,
+                            model.MODEL_NAME,
+                            self.host,
+                        )
+                    system_info["modelNumber"] = model.MODEL_NAME
+                    if isinstance(response, Response):
+                        response._content = json.dumps(  # noqa: SLF001
+                            body, separators=(",", ":")
+                        ).encode("utf-8")
+                    return
+
+        _LOGGER.debug(
+            "[PageFetcher.json_request] JSON REST status response for IP=%s did "
+            "not contain a known model. top_level_keys=%s system_info_keys=%s",
+            self.host,
+            sorted(body.keys()),
+            sorted(system_info.keys()),
+        )
+
     def json_request(
         self,
         method: str,
@@ -173,7 +297,9 @@ class PageFetcher:
     ) -> Response | BaseResponse:
         """Make a JSON REST API request with optional Bearer token auth."""
         if self.offline_mode:
-            return self.get_page_from_file(url)
+            response = self.get_page_from_file(url)
+            self._prepare_json_response(url, response, data)
+            return response
         headers = {
             "Accept": "application/json, text/plain, */*",
         }
@@ -195,6 +321,7 @@ class PageFetcher:
             requests.exceptions.ChunkedEncodingError,
         ) as error:
             raise PageFetcherConnectionError from error
+        self._prepare_json_response(url, response, data)
         return response
 
     def get_page_from_file(self, url: str) -> BaseResponse:
