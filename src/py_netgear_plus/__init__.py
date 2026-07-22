@@ -38,6 +38,14 @@ PORT_MODUS_SPEED = ["Auto"]
 SWITCH_STATES = ["on", "off"]
 FLOW_CONTROL = ["Enable", "Disable"]
 
+# Port speed values used by supported Netgear Plus switch web interfaces.
+PORT_SPEED_AUTO = 1
+PORT_SPEED_DISABLED = 2
+PORT_SPEED_10_HALF = 3
+PORT_SPEED_10_FULL = 4
+PORT_SPEED_100_HALF = 5
+PORT_SPEED_100_FULL = 6
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -766,31 +774,61 @@ class NetgearSwitchConnector:
         )
         return self._page_parser.parse_port_settings(response)
 
-    def set_port_name(self, port: int, name: str) -> bool:
-        """Rename a port, preserving other port settings."""
+    def set_port_settings(  # noqa: PLR0913
+        self,
+        port: int,
+        *,
+        name: str | None = None,
+        speed: int | None = None,
+        flow_control: int | bool | str | None = None,
+        ingress_rate: int | None = None,
+        egress_rate: int | None = None,
+    ) -> bool:
+        """Update selected settings for a port, preserving unspecified values."""
         if not self.switch_model.PORT_SETTINGS_TEMPLATES:
-            message = "Port renaming is not supported on this model"
+            message = "Port settings cannot be changed on this model"
             raise NotImplementedError(message)
 
         all_settings = self.get_port_settings()
         if port not in all_settings:
             message = f"Port {port} not found on switch"
             raise PortNumberOutofRangeError(message)
-        cur = all_settings[port]
+        current = all_settings[port]
+
+        selected_flow_control = (
+            current["flow_control"] if flow_control is None else flow_control
+        )
+        normalized_flow_control = _normalize_flow_control(selected_flow_control)
+        if normalized_flow_control is None:
+            message = f"Invalid flow control value: {selected_flow_control!r}"
+            raise ValueError(message)
+
+        # The POST template requires a client hash. Load it automatically so
+        # callers can write settings immediately after logging in.
+        if not self._client_hash:
+            self._get_switch_metadata()
 
         for template in self.switch_model.PORT_SETTINGS_TEMPLATES:
             url = template["url"].format(ip=self.host)
             method = template["method"]
             data = self.switch_model.get_port_settings_data(
                 port=port,
-                description=name,
-                speed=cur["speed"],
-                flow_control=cur["flow_control"],
-                ingress_rate=cur["ingress_rate"],
-                egress_rate=cur["egress_rate"],
+                description=current["name"] if name is None else name,
+                speed=current["speed"] if speed is None else speed,
+                flow_control=normalized_flow_control,
+                ingress_rate=(
+                    current["ingress_rate"]
+                    if ingress_rate is None
+                    else ingress_rate
+                ),
+                egress_rate=(
+                    current["egress_rate"]
+                    if egress_rate is None
+                    else egress_rate
+                ),
                 priority=0,
             )
-            _LOGGER.debug("set_port_name data=%s", data)
+            _LOGGER.debug("set_port_settings data=%s", data)
             self._page_fetcher.set_data_from_template(template, self, data)
 
             response = BaseResponse
@@ -810,9 +848,13 @@ class NetgearSwitchConnector:
             if isinstance(content, (bytes, str)):
                 content = content.strip()
             _LOGGER.warning(
-                "NetgearSwitchConnector.set_port_name response was %s", content
+                "NetgearSwitchConnector.set_port_settings response was %s", content
             )
         return False
+
+    def set_port_name(self, port: int, name: str) -> bool:
+        """Rename a port, preserving other port settings."""
+        return self.set_port_settings(port, name=name)
 
     def get_ip_config(self) -> dict[str, Any]:
         """Return current IP/DHCP configuration."""

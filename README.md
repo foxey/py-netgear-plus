@@ -120,3 +120,33 @@ print(data)
 sw.turn_off_poe_port(1) # Supported only on PoE capable models
 sw.turn_on_poe_port(1)
 ```
+
+### Port settings
+
+On supported models, selected port settings can be changed while unspecified
+settings are preserved:
+
+```python
+from py_netgear_plus import PORT_SPEED_DISABLED
+
+sw.set_port_settings(
+    8,
+    name="Office PC",
+    speed=PORT_SPEED_DISABLED,
+    flow_control=False,
+)
+```
+
+`set_port_name(port, name)` remains available as a convenience wrapper around
+`set_port_settings()`.
+
+Port-speed constants and their underlying API values are:
+
+| Constant | API value | Setting |
+| --- | ---: | --- |
+| `PORT_SPEED_AUTO` | `1` | Auto |
+| `PORT_SPEED_DISABLED` | `2` | Disabled |
+| `PORT_SPEED_10_HALF` | `3` | 10M half duplex |
+| `PORT_SPEED_10_FULL` | `4` | 10M full duplex |
+| `PORT_SPEED_100_HALF` | `5` | 100M half duplex |
+| `PORT_SPEED_100_FULL` | `6` | 100M full duplex |
