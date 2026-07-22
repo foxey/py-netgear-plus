@@ -10,6 +10,7 @@ import requests
 import requests.cookies
 from py_netgear_plus import (
     DEFAULT_PAGE,
+    PORT_SPEED_DISABLED,
     NetgearSwitchConnector,
     _from_bytes_to_megabytes,
 )
@@ -1432,5 +1433,107 @@ def test_capability_matrix() -> None:
         assert not m.has_password_change(), cls.__name__
 
 
+def _make_port_settings_connector() -> NetgearSwitchConnector:
+    """Return a GS308EP connector prepared for port-setting write tests."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector.switch_model = GS308EP()
+    connector._client_hash = "test-hash"
+    connector.get_port_settings = Mock(  # type: ignore[method-assign]
+        return_value={
+            8: {
+                "name": "Old name",
+                "speed": 1,
+                "flow_control": 2,
+                "ingress_rate": 1,
+                "egress_rate": 1,
+            }
+        }
+    )
+    connector._page_fetcher.set_data_from_template = (  # type: ignore[method-assign]
+        Mock()
+    )
+    response = Mock(status_code=requests.codes.ok, content=b"SUCCESS")
+    connector._page_fetcher.request = (  # type: ignore[method-assign]
+        Mock(return_value=response)
+    )
+    return connector
+
+
+def test_set_port_settings_preserves_unspecified_values() -> None:
+    """Changing one setting preserves all other current port values."""
+    connector = _make_port_settings_connector()
+
+    assert connector.set_port_settings(8, speed=6)
+
+    connector._page_fetcher.request.assert_called_once_with(
+        "post",
+        "http://192.168.0.1/port_status.cgi",
+        {
+            "port8": "checked",
+            "DESCRIPTION": "Old name",
+            "SPEED": "6",
+            "FLOW_CONTROL": "2",
+            "IngressRate": "1",
+            "EgressRate": "1",
+            "priority": "0",
+        },
+    )
+
+
+def test_set_port_settings_can_disable_port() -> None:
+    """The documented disabled-speed value is sent unchanged."""
+    connector = _make_port_settings_connector()
+
+    assert connector.set_port_settings(8, speed=PORT_SPEED_DISABLED)
+
+    data = connector._page_fetcher.request.call_args.args[2]
+    assert data["SPEED"] == str(PORT_SPEED_DISABLED)
+
+
+def test_set_port_settings_updates_multiple_values() -> None:
+    """The generic writer passes all requested values to the model builder."""
+    connector = _make_port_settings_connector()
+
+    assert connector.set_port_settings(
+        8,
+        name="TESTPORT",
+        speed=6,
+        flow_control=True,
+        ingress_rate=10,
+        egress_rate=2,
+    )
+
+    data = connector._page_fetcher.request.call_args.args[2]
+    assert data == {
+        "port8": "checked",
+        "DESCRIPTION": "TESTPORT",
+        "SPEED": "6",
+        "FLOW_CONTROL": "1",
+        "IngressRate": "10",
+        "EgressRate": "2",
+        "priority": "0",
+    }
+
+
+def test_set_port_name_uses_generic_port_settings_writer() -> None:
+    """The existing public rename method remains backward compatible."""
+    connector = _make_port_settings_connector()
+    connector.set_port_settings = Mock(return_value=True)  # type: ignore[method-assign]
+
+    assert connector.set_port_name(8, "TESTPORT")
+    connector.set_port_settings.assert_called_once_with(8, name="TESTPORT")
+
+
+def test_set_port_settings_rejects_unsupported_model() -> None:
+    """Models without port-setting templates remain unaffected."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector.switch_model = GS316EPP()
+    connector._page_fetcher.request = Mock()  # type: ignore[method-assign]
+
+    with pytest.raises(NotImplementedError):
+        connector.set_port_settings(1, speed=1)
+
+    connector._page_fetcher.request.assert_not_called()
+    
 if __name__ == "__main__":
     pytest.main()
