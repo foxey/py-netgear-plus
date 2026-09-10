@@ -10,20 +10,12 @@ from lxml import html
 from requests import Response
 
 from .fetcher import BaseResponse
-from .models import VLANMember
 from .utils import get_all_child_classes_dict
 
 _LOGGER = logging.getLogger(__name__)
 
 API_V2_CHECKS = {
-    "bootloader": [
-        "V1.00.02",
-        "V1.00.03",
-        "V2.06.01",
-        "V2.06.02",
-        "V2.06.03",
-        "V1.6.0.2-VB",
-    ],
+    "bootloader": ["V1.00.03", "V2.06.01", "V2.06.02", "V2.06.03", "V1.6.0.2-VB"],
     "firmware": ["V2.06.24GR", "V2.06.24EN", "V1.6.0.17"],
 }
 
@@ -149,6 +141,20 @@ class PageParser:
         """Return true of rand value from login page is present."""
         return bool(self.parse_login_form_rand(page))
 
+    def parse_login_csrf_token(
+        self, page: Response | BaseResponse | None
+    ) -> str | None:
+        """Return csrftoken hidden field value from login page if present."""
+        if page is not None and page.content:
+            tree = html.fromstring(page.content)
+            csrf_elems = tree.xpath('//input[@name="csrftoken"]')
+            if csrf_elems and csrf_elems[0].value:
+                return csrf_elems[0].value
+        _LOGGER.debug(
+            "[PageParser.parse_login_csrf_token] csrftoken INPUT element not found."
+        )
+        return None
+
     def parse_login_title_tag(self, page: Response | BaseResponse) -> str | None:
         """Return the title tag from the login page."""
         """For new firmwares V2.06.10, V2.06.17, V2.06.24."""
@@ -243,11 +249,6 @@ class PageParser:
         """Parse the client hash from the html page."""
         tree = html.fromstring(page.content)
         return get_first_value(tree, '//input[@name="hash"]')
-
-    def parse_initial_password_hash(self, page: Response | BaseResponse) -> str | None:
-        """Parse the hash served by the factory-state hash iframe."""
-        del page
-        raise NotImplementedError
 
     def parse_led_status(self, page: Response | BaseResponse) -> dict[str, Any]:
         """Parse status of the front panel LEDs from the html page."""
@@ -366,21 +367,6 @@ class PageParser:
     def parse_reboot_success(self, page: Response | BaseResponse) -> bool:
         """Parse if reboot was successful."""
         return page.status_code == requests.codes.ok
-
-    def parse_vlan_status(self, page: Response | BaseResponse) -> dict[str, Any]:
-        """Parse VLAN status from the html page."""
-        raise NotImplementedError
-
-    def parse_port_settings(
-        self, page: Response | BaseResponse
-    ) -> dict[int, dict[str, Any]]:
-        """Parse per-port settings (name/speed/rates/flow-control)."""
-        raise NotImplementedError
-
-    def parse_ip_config(self, page: Response | BaseResponse) -> dict[str, Any]:
-        """Parse current IP/DHCP configuration."""
-        del page
-        raise NotImplementedError
 
 
 class GS105E(PageParser):
@@ -837,6 +823,113 @@ class XS512EM(EMxSeries):
         super().__init__()
 
 
+class XS716E(PageParser):
+    """Parser for the XS716E switch (system.htm / portconf.htm / statist.htm)."""
+
+    def __init__(self) -> None:
+        """Initialize the XS716E parser."""
+        super().__init__()
+
+    def parse_switch_metadata(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse switch info from system.htm."""
+        tree = html.fromstring(page.content)
+
+        def value_for(label_id: str) -> str:
+            return get_first_text(
+                tree,
+                f'//span[@id="{label_id}"]/parent::td/following-sibling::td[1]',
+            )
+
+        self._switch_bootloader = "unknown"
+        self._switch_firmware = value_for("system_fw_version")
+
+        return {
+            "switch_name": get_first_value(tree, '//input[@id="switch_name"]'),
+            "switch_serial_number": value_for("system_serial_number"),
+            "switch_bootloader": self._switch_bootloader,
+            "switch_firmware": self._switch_firmware,
+        }
+
+    def parse_client_hash(self, page: Response | BaseResponse) -> str | None:
+        """No per-request client hash on this model."""
+        del page
+        return None
+
+    def parse_port_status(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[int, dict[str, Any]]:
+        """Parse port status from portconf.htm (table#tbl2, tr.portID rows)."""
+        # Columns: [checkbox, port#, status, auto-neg, link speed, flow control,
+        # max MTU]; port# / status / link speed also carry a hidden <input value>.
+        tree = html.fromstring(page.content)
+        rows = tree.xpath('//tr[@class="portID"]')
+        if len(rows) != ports:
+            message = f"Port count mismatch: {len(rows)} != {ports}"
+            raise NetgearPlusPageParserError(message)
+
+        def first(values: list[str]) -> str:
+            return values[0].strip() if values else ""
+
+        status_by_port = {}
+        for row in rows:
+            tds = row.xpath("./td")
+            try:
+                port_nr = int(first(tds[1].xpath(".//input/@value")))
+            except (IndexError, ValueError) as error:
+                message = "parse_port_status: port number not found."
+                raise NetgearPlusPageParserError(message) from error
+            status_by_port[port_nr] = {
+                "status": first(tds[2].xpath(".//input/@value")),
+                "modus_speed": first(tds[3].xpath(".//span/text()")),
+                "connection_speed": strip_duplex(
+                    first(tds[4].xpath(".//input/@value"))
+                ),
+                "flow_control": first(tds[5].xpath(".//span/text()")),
+            }
+        self._port_status = status_by_port
+        _LOGGER.debug("Port Status is %s", status_by_port)
+        return status_by_port
+
+    def parse_port_statistics(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[str, Any]:
+        """Parse port statistics from statist.htm (table#tbl2, tr.portID rows)."""
+        # Columns: [port#, bytes received, bytes sent, CRC errors].
+        # Byte counters are 32-bit and wrap around.
+        tree = html.fromstring(page.content)
+        rows = tree.xpath('//tr[@class="portID"]')
+        rx = [0] * ports
+        tx = [0] * ports
+        crc = [0] * ports
+
+        def cell_int(cell: html.HtmlElement) -> int:
+            try:
+                return int(cell.text.strip())
+            except (AttributeError, ValueError):
+                return 0
+
+        for row in rows:
+            tds = row.xpath("./td")
+            try:
+                port_index = int(tds[0].text.strip()) - 1
+            except (IndexError, AttributeError, ValueError):
+                continue
+            if not 0 <= port_index < ports:
+                continue
+            rx[port_index] = cell_int(tds[1])
+            tx[port_index] = cell_int(tds[2])
+            crc[port_index] = cell_int(tds[3])
+
+        return {
+            "traffic_rx": rx,
+            "traffic_tx": tx,
+            "sum_rx": rx,
+            "sum_tx": tx,
+            "crc_errors": crc,
+            "speed_io": [0] * ports,
+        }
+
+
 class GS30xSeries(PageParser):
     """Parser for the GS30x switch series."""
 
@@ -988,118 +1081,6 @@ class GS30xSeries(PageParser):
             requests.codes.ok,
             requests.codes.no_response,
         ]
-
-    def parse_vlan_status(self, page: Response | BaseResponse) -> dict[str, Any]:
-        """Parse vlan page into a configuration dict."""
-        tree = html.fromstring(page.content)
-        modes = [
-            m.attrib
-            for m in tree.xpath('//div[contains(@class,"vlan-left-view")]//button')
-        ]
-        mode_idx = int(tree.xpath('//input[contains(@id,"vlanMod")]')[0].value)
-        sel_mode = next(m["name"] for m in modes if int(m["mod-num"]) == mode_idx)
-        vlans = {}
-        ports = {}
-
-        if sel_mode == "adv8021Q":
-            # Doesn't seem like there is a better xpath than relying
-            # on index for GS308EP
-            desc = tree.xpath(
-                '(//div[contains(@class, "vlan-right-view")]'
-                '//ul[contains(@class, "tab-init")])[1]//li'
-            )
-            for d in desc:
-                r = d.xpath(".//span")
-                vlans[int(r[0].text_content())] = {
-                    "name": r[1].text,
-                    "members": [int(x) for x in r[2].text.strip().split(" ")],
-                    "cfg": {
-                        i: VLANMember.from_web_code(x)
-                        for i, x in enumerate(
-                            d.xpath(".//input[@hidden-mem]")[0].value, 1
-                        )
-                    },
-                }
-            for itm in tree.xpath('//ul[contains(@class, "pvid-tab")]//li'):
-                port = int(itm.xpath('.//span[contains(@class, "pot-num")]')[0].text)
-                ports[port] = {
-                    "name": itm.xpath('.//div[contains(@class, "pot-nam")]/span')[
-                        0
-                    ].text,
-                    "pvid": int(
-                        next(
-                            x[:-1]
-                            for x in itm.xpath(".//span[@pvid-str]")[0]
-                            .text.strip()
-                            .split(",")
-                            if "*" in x
-                        )
-                    ),
-                    "vlans": {
-                        vkey: vval["cfg"][port]
-                        for vkey, vval in vlans.items()
-                        if vval["cfg"][port] != VLANMember.EXCLUDED
-                    },
-                }
-        elif sel_mode != "noVlan":
-            _LOGGER.warning("Mode description for %s not implemented", sel_mode)
-
-        return {
-            "mode": sel_mode,
-            "vlans": vlans,
-            "ports": ports,
-        }
-
-    def parse_port_settings(
-        self, page: Response | BaseResponse
-    ) -> dict[int, dict[str, Any]]:
-        """Parse per-port settings from dashboard.cgi."""
-        tree = html.fromstring(page.content)
-        result: dict[int, dict[str, Any]] = {}
-        for li in tree.xpath('//li[contains(@class, "index_li")]'):
-            port_in = li.xpath('.//input[contains(@class, "port") and @value][1]')
-            if not port_in:
-                continue
-            try:
-                port = int(port_in[0].value)
-            except (TypeError, ValueError):
-                continue
-            name_el = li.xpath('.//input[contains(@class, "portName")]')
-            speed_el = li.xpath(
-                './/input[contains(@class, "Speed") '
-                'and not(contains(@class, "LinkedSpeed"))]'
-            )
-            ing_el = li.xpath('.//input[contains(@class, "ingressRate")]')
-            egr_el = li.xpath('.//input[contains(@class, "egressRate")]')
-            flow_el = li.xpath('.//input[contains(@class, "flowCtr")]')
-            result[port] = {
-                "name": name_el[0].value if name_el else "",
-                "speed": int(speed_el[0].value) if speed_el else 1,
-                "ingress_rate": int(ing_el[0].value) if ing_el else 1,
-                "egress_rate": int(egr_el[0].value) if egr_el else 1,
-                "flow_control": int(flow_el[0].value) if flow_el else 2,
-            }
-        return result
-
-    def parse_ip_config(self, page: Response | BaseResponse) -> dict[str, Any]:
-        """Parse current IP/DHCP configuration from ip_dhcp.cgi."""
-        tree = html.fromstring(page.content)
-
-        def _val(xpath: str) -> str:
-            elems = tree.xpath(xpath)
-            return elems[0].value if elems and elems[0].value is not None else ""
-
-        return {
-            "dhcp": _val('//input[@id="dhcpModFlag"]').lower() == "true",
-            "ip_address": _val('//input[@id="ipStr"]'),
-            "subnet_mask": _val('//input[@id="netMaskStr"]'),
-            "gateway": _val('//input[@id="gatewayStr"]'),
-        }
-
-    def parse_initial_password_hash(self, page: Response | BaseResponse) -> str | None:
-        """Parse the hash served by the factory-state hash iframe."""
-        tree = html.fromstring(page.content)
-        return get_first_value(tree, '//input[@id="hashEle"]')
 
 
 class GS305EP(GS30xSeries):
