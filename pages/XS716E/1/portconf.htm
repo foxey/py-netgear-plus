@@ -1,0 +1,456 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+<title>Port Status</title>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<meta name="format-detection" content="telephone=no,email=no,address=no">
+<link rel="stylesheet" type="text/css" href="style.css?v=V1.6.0.30">
+<script  src="XS716E/frame.js?v=V1.6.0.30" type="text/javascript"></script>
+<script  src="XS716E/function.js?v=V1.6.0.30" type="text/javascript"></script>
+<script src="XS716E/portconf_en.js?v=V1.6.0.30" type="text/javascript"></script>
+<script>
+	var refreshstr=top.glbButtonStr[0][3][0];
+	var applystr=parent.glbButtonStr[0][1][1];
+	var speed_array = new Array();
+	
+	speed_array[1-1] = "1";
+	
+	speed_array[2-1] = "1";
+	
+	speed_array[3-1] = "1";
+	
+	speed_array[4-1] = "1";
+	
+	speed_array[5-1] = "1";
+	
+	speed_array[6-1] = "1";
+	
+	speed_array[7-1] = "1";
+	
+	speed_array[8-1] = "1";
+	
+	speed_array[9-1] = "1";
+	
+	speed_array[10-1] = "1";
+	
+	speed_array[11-1] = "1";
+	
+	speed_array[12-1] = "1";
+	
+	speed_array[13-1] = "1";
+	
+	speed_array[14-1] = "1";
+	
+	speed_array[15-1] = "1";
+	
+	speed_array[16-1] = "1";
+	
+</script>
+</head>
+<body onload="initTableCss(); initErrMsg(portconfStr0001);">
+<form method="post" action="setport.cgi">
+<input type=hidden name='session' id='session' value='0a138f368'>
+<table class="detailsAreaContainer">
+    <tr>
+        <td><table class="tableStyle">
+    <tr><script>tbhdrTable(portconfStr0001,'portStatus')</script></tr>
+    <tr><td class="paddingTableBody" colspan="2">
+    <table class="tableStyle" id="tbl2" style='width:600px;'>
+    <tr>
+        <td class="def_TH spacer4Percent def_center"><input type="checkbox" name="checkALL" rownumber="" value="notchecked" onclick="checkAllCheckedRows('portID')" /></td>
+        <td class="def_TH"><span id="portconf_port"><script>document.write(top.glbButtonStr[0][4][1])</script></span></td>
+        <!-- <td class="def_TH">Description</td> -->
+        <td class="def_TH spacer40Percent"><span id="portconf_port_status"><script>document.write(portconfStr0001)</script></span></td>
+        <td class="def_TH spacer22Percent"><span id="portconf_speed"><script>document.write(portconfStr0002)</script></span></td>
+        <td class="def_TH spacer50Percent"><span id="portconf_linked_speed"><script>document.write(portconfStr0003)</script></span></td>
+        <td class="def_TH spacer22Percent"><span id="portconf_flow_control"><script>document.write(portconfStr0004)</script></span></td>
+        <td class="def_TH spacer40Percent"><span id="portconf_max_mtu"><script>document.write(portconfStr0009)</script></span></td>
+    </tr>
+    <tr id="g_1_1" exclusive="">
+        <td class="def_TH def_center"></td>
+        <td class="def_TH" sel="text"></td>
+        <!-- <td class="def_TH" sel="input"><input name="DESC" type="text"></input></td> -->
+        <td class="def_TH" sel="text"></td>
+        <td class="def_TH" sel="select"><select name="SPEED" disabled>
+                <option value="0"></option>
+                <option value="1" id="portconf_speed_auto"><script>document.write(portconfStr0005)</script></option>
+                <option value="2" id="portconf_speed_disable"><script>document.write(top.glbButtonStr[0][0][0])</script></option>
+                <option value="4" id="portconf_speed_100MFull"><script>document.write(portconfStr0006)</script></option>
+            </select>
+        </td>
+        <td class="def_TH" sel="text"></td>
+        <td class="def_TH" sel="select"><select name="FLOW_CONTROL" disabled>
+                <option value="0"></option>
+                <option value="1" id="portconf_flow_control_enable"><script>document.write(top.glbButtonStr[0][0][1])</script></option>
+                <option value="2" id="portconf_flow_control_disable"><script>document.write(top.glbButtonStr[0][0][0])</script></option>
+            </select>
+        </td>
+        <td class="def_TH" sel="text"></td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port1" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">1
+            <input type="hidden" value="1">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed1">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed1">1000M Full</span>
+            <input type="hidden" value="1000M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control1">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port2" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">2
+            <input type="hidden" value="2">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed2">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed2">1000M Full</span>
+            <input type="hidden" value="1000M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control2">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port3" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">3
+            <input type="hidden" value="3">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed3">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed3">1000M Full</span>
+            <input type="hidden" value="1000M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control3">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port4" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">4
+            <input type="hidden" value="4">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed4">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed4">1000M Full</span>
+            <input type="hidden" value="1000M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control4">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port5" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">5
+            <input type="hidden" value="5">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Down
+            <input type="hidden" value="Down">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed5">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed5">No Speed</span>
+            <input type="hidden" value="No Speed">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control5">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port6" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">6
+            <input type="hidden" value="6">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed6">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed6">1000M Full</span>
+            <input type="hidden" value="1000M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control6">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port7" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">7
+            <input type="hidden" value="7">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed7">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed7">1000M Full</span>
+            <input type="hidden" value="1000M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control7">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port8" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">8
+            <input type="hidden" value="8">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Down
+            <input type="hidden" value="Down">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed8">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed8">No Speed</span>
+            <input type="hidden" value="No Speed">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control8">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port9" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">9
+            <input type="hidden" value="9">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed9">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed9">1000M Full</span>
+            <input type="hidden" value="1000M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control9">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port10" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">10
+            <input type="hidden" value="10">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed10">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed10">100M Full</span>
+            <input type="hidden" value="100M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control10">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port11" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">11
+            <input type="hidden" value="11">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed11">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed11">1000M Full</span>
+            <input type="hidden" value="1000M Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control11">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port12" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">12
+            <input type="hidden" value="12">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Down
+            <input type="hidden" value="Down">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed12">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed12">No Speed</span>
+            <input type="hidden" value="No Speed">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control12">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port13" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">13
+            <input type="hidden" value="13">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Down
+            <input type="hidden" value="Down">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed13">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed13">No Speed</span>
+            <input type="hidden" value="No Speed">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control13">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port14" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">14
+            <input type="hidden" value="14">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Down
+            <input type="hidden" value="Down">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed14">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed14">No Speed</span>
+            <input type="hidden" value="No Speed">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control14">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port15" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">15
+            <input type="hidden" value="15">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Down
+            <input type="hidden" value="Down">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed15">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed15">No Speed</span>
+            <input type="hidden" value="No Speed">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control15">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    <tr class="portID"><td class="def firstCol def_center"><input class="checkbox" type="checkbox" name="port16" rownumber="" value="checked" onclick="checkBoxOnclick();" >
+        </td>
+        <td class="def firstCol" sel="text">16
+            <input type="hidden" value="16">
+        </td>
+        <!-- <td class="def " sel="input"></td> -->
+        <td class="def " sel="text">Up
+            <input type="hidden" value="Up">
+        </td>
+        <td class="def " id="an" sel="select2"><span id="portconf_speed16">Auto</span>
+            <input type="hidden" value="1">
+        </td>
+        <td class="def " sel="text2"><span id="portconf_linkspeed16">10G Full</span>
+            <input type="hidden" value="10G Full">
+        </td>
+        <td class="def " id="fc" sel="select2"><span id="portconf_flow_control16">Disable</span>
+            <input type="hidden" value="2">
+        </td>
+        <td class="def " sel="text2">9198
+        </td>
+    </tr>
+    
+    </table>
+    </td></tr>
+</table>
+</td></tr></table>
+<input type=hidden name='err_msg' id='err_msg' value="" disabled>
+</form>
+<script>
+var str = CreateButtons('button',refreshstr,'refreshForm()','btn_Refresh','on');
+str += CreateButtons('button',applystr, 'javaScript:void(0)','btn_Apply','off');
+PaintButtons(str);
+</script>
+</head>
+</html>
