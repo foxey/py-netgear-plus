@@ -372,6 +372,7 @@ def test_get_login_cookie(
             data=data,
             allow_redirects=True,
             timeout=URL_REQUEST_TIMEOUT,
+            stream=True,
         )
         (cookie_name, cookie_value) = connector.get_cookie()
         assert cookie_name is not None
@@ -520,6 +521,7 @@ def test_turn_on_and_off_port(switch_model: type[AutodetectedSwitchModel]) -> No
                     data=expected_data,
                     cookies=cookies,
                     timeout=URL_REQUEST_TIMEOUT,
+                    stream=True,
                     allow_redirects=False,
                 )
 
@@ -569,6 +571,7 @@ def test_switch_port_uses_model_defaults_when_optional_fields_missing(
             data=expected_data,
             cookies=cookies,
             timeout=URL_REQUEST_TIMEOUT,
+            stream=True,
             allow_redirects=False,
         )
 
@@ -713,6 +716,7 @@ def test_turn_on_and_off_poe_port(switch_model: type[AutodetectedSwitchModel]) -
                     data=data,
                     cookies=cookies,
                     timeout=URL_REQUEST_TIMEOUT,
+                    stream=True,
                     allow_redirects=False,
                 )
 
@@ -833,6 +837,7 @@ def test_reboot(
                 data=data,
                 cookies=cookies,
                 timeout=URL_REQUEST_TIMEOUT,
+                stream=True,
                 allow_redirects=False,
             )
 
