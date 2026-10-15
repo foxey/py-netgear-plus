@@ -176,6 +176,10 @@ class PageFetcher:
             return self.get_page_from_file(url)
         headers = {
             "Accept": "application/json, text/plain, */*",
+            # MS3xx firmware (seen on MS308E v1.0.0.8) answers HTTP 400 with
+            # errCode -2 "unauthorized user" to every call, login included,
+            # unless the Referer is the switch itself, as the web UI sends.
+            "Referer": f"http://{self.host}/",
         }
         if self._bearer_token:
             headers["Authorization"] = f"Bearer {self._bearer_token}"
