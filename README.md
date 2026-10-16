@@ -28,6 +28,21 @@ some basic configuration updates.
 | Port {port} Status            | `port_{port}_status`               | "on"/"off"                          |
 | Port {poe_port} POE Power     | `port_{poe_port}_poe_power_active` | "on"/"off"                          |
 
+PoE capable models of the GS30x series (GS305EP/EPP, GS308EP/EPP) also expose per PoE port:
+
+| Name                            | key from `get_switch_infos()`         | Unit                                                   |
+| ------------------------------- | ------------------------------------- | ------------------------------------------------------ |
+| Port {poe_port} POE Status      | `port_{poe_port}_poe_status`          | "delivering_power"/"searching"/"disabled"              |
+| Port {poe_port} POE Delivering  | `port_{poe_port}_poe_power_delivered` | "on"/"off"                                                   |
+| Port {poe_port} POE Class       | `port_{poe_port}_poe_class`           | 0-8 or `None` when no powered device                   |
+| Port {poe_port} POE Voltage     | `port_{poe_port}_poe_voltage`         | V                                                      |
+| Port {poe_port} POE Current     | `port_{poe_port}_poe_current`         | mA                                                     |
+| Port {poe_port} POE Power       | `port_{poe_port}_poe_output_power`    | W                                                      |
+| Port {poe_port} POE Temperature | `port_{poe_port}_poe_temperature`     | °C                                                     |
+| Port {poe_port} POE Fault       | `port_{poe_port}_poe_fault`           | text, "No Error" when fine                             |
+
+`get_port_infos()` and `get_poe_port_infos()` return the same data regrouped per port number.
+
 ### List of aggregated statistics
 
 | Sensor Name             | key from `get_switch_infos()` | Unit                  |
@@ -82,6 +97,11 @@ Supported firmware languages: GR (German), EN (English)
 export NETGEAR_PLUS_PASSWORD=s3cr3t # replace with your password
 ngp-cli login 192.168.178.68 # replace with IP address of your switch
 ngp-cli status
+ngp-cli port list        # link status, speed and settings per port
+ngp-cli poe status       # PoE config and live status per port (PoE models)
+ngp-cli poe off 7        # disable / enable / power-cycle PoE on a port
+ngp-cli poe on 7
+ngp-cli poe cycle 7
 ngp-cli logout
 ngp-cli -h
 ```

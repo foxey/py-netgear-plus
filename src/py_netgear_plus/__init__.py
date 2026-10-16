@@ -41,6 +41,16 @@ FLOW_CONTROL = ["Enable", "Disable"]
 _LOGGER = logging.getLogger(__name__)
 
 
+def _group_by_port(flat: dict[str, Any], prefix: str = "") -> dict[int, dict[str, Any]]:
+    """Regroup flat "port_{n}_{prefix}{key}" entries into {n: {key: value}}."""
+    grouped: dict[int, dict[str, Any]] = {}
+    for key, value in flat.items():
+        _, port_nr, name = key.split("_", 2)
+        if name.startswith(prefix):
+            grouped.setdefault(int(port_nr), {})[name[len(prefix) :]] = value
+    return grouped
+
+
 def _from_bytes_to_megabytes(v: float) -> float:
     bytes_to_mbytes = 1e-6
     return float(f"{round(v * bytes_to_mbytes, 2):.2f}")
@@ -1460,16 +1470,62 @@ class NetgearSwitchConnector:
         )
         return self._page_parser.parse_poe_port_status(response)
 
-    def _get_port_status(self) -> dict:
-        switch_data = {}
+    def get_poe_port_infos(self) -> dict[int, dict[str, Any]]:
+        """
+        Return PoE configuration and live status per PoE port.
+
+        Result is keyed by port number, e.g.
+        {1: {"power_active": "on", "status": "delivering_power",
+             "power_delivered": "on", "output_power": 6.1, ...}}.
+        """
+        if not self.switch_model:
+            self.autodetect_model()
+        if not self.switch_model.POE_PORTS:
+            message = f"{self.switch_model.MODEL_NAME} has no PoE ports."
+            raise NotImplementedError(message)
+        flat = self._get_poe_port_config()
+        time.sleep(self.sleep_time)
+        flat.update(self._get_poe_port_status())
+        return _group_by_port(flat, "poe_")
+
+    def get_port_infos(self) -> dict[int, dict[str, Any]]:
+        """
+        Return link status, speed and (where supported) settings per port.
+
+        Result is keyed by port number, e.g.
+        {1: {"status": "on", "modus_speed": True, "connection_speed": 1000,
+             "name": "cam", "speed": 1, "ingress_rate": 1, "egress_rate": 1,
+             "flow_control": 2}}.
+        """
+        if not self.switch_model:
+            self.autodetect_model()
         if self._is_json_api:
-            response_portstatus = self._json_api_fetch(
-                self.switch_model.PORT_STATUS_TEMPLATES
-            )
-        else:
-            response_portstatus = self.fetch_page_from_templates(
-                self.switch_model.PORT_STATUS_TEMPLATES
-            )
+            return _group_by_port(self._get_port_status())
+        response = self.fetch_page_from_templates(
+            self.switch_model.PORT_STATUS_TEMPLATES
+        )
+        infos = _group_by_port(self._get_port_status(response))
+        if self.switch_model.PORT_SETTINGS_TEMPLATES:
+            for port_nr, settings in self._page_parser.parse_port_settings(
+                response
+            ).items():
+                for key, value in settings.items():
+                    infos.setdefault(port_nr, {}).setdefault(key, value)
+        return infos
+
+    def _get_port_status(
+        self, response_portstatus: Response | BaseResponse | None = None
+    ) -> dict:
+        switch_data = {}
+        if response_portstatus is None:
+            if self._is_json_api:
+                response_portstatus = self._json_api_fetch(
+                    self.switch_model.PORT_STATUS_TEMPLATES
+                )
+            else:
+                response_portstatus = self.fetch_page_from_templates(
+                    self.switch_model.PORT_STATUS_TEMPLATES
+                )
         port_status = self._page_parser.parse_port_status(
             response_portstatus, self.ports
         )

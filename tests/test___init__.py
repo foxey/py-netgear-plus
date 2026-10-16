@@ -36,6 +36,7 @@ from py_netgear_plus.models import (
     JGS524Ev2,
 )
 from py_netgear_plus.netgear_crypt import hex_hmac_md5, merge_hash
+from py_netgear_plus.parsers import create_page_parser
 
 if TYPE_CHECKING:
     from http.cookiejar import Cookie
@@ -1435,6 +1436,111 @@ def test_capability_matrix() -> None:
         assert not m.has_port_naming(), cls.__name__
         assert not m.has_ip_config(), cls.__name__
         assert not m.has_password_change(), cls.__name__
+
+
+def _offline_connector(
+    switch_model: type[AutodetectedSwitchModel], sequence: int = 1
+) -> NetgearSwitchConnector:
+    """Return a connector reading pages from the fixture directory."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector.turn_on_offline_mode(f"pages/{switch_model.MODEL_NAME}/{sequence}")
+    connector._set_instance_attributes_by_model(switch_model)
+    connector._page_parser = create_page_parser(switch_model.MODEL_NAME)
+    return connector
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "port", "expected"),
+    [
+        (
+            GS308EP,
+            1,
+            {
+                "status": "delivering_power",
+                "power_delivered": "on",
+                "class": 4,
+                "voltage": 51,
+                "current": 119,
+                "output_power": 6.1,
+                "temperature": 44,
+                "fault": "No Error",
+            },
+        ),
+        (
+            GS308EP,
+            5,
+            {
+                "status": "searching",
+                "power_delivered": "off",
+                "class": None,
+                "output_power": 0.0,
+            },
+        ),
+        (GS308EP, 7, {"status": "disabled", "power_delivered": "off"}),
+        (
+            GS308EPP,
+            5,
+            {"status": "delivering_power", "class": 0, "output_power": 1.5},
+        ),
+    ],
+)
+def test_parse_poe_port_status_gs30x(
+    switch_model: type[AutodetectedSwitchModel], port: int, expected: dict
+) -> None:
+    """Test PoE status parsing for the GS30x series."""
+    parser = create_page_parser(switch_model.MODEL_NAME)
+    response = BaseResponse()
+    response.content = Path(
+        f"pages/{switch_model.MODEL_NAME}/1/getPoePortStatus.cgi"
+    ).read_bytes()
+    data = parser.parse_poe_port_status(response)
+    for key, value in expected.items():
+        assert data[f"port_{port}_poe_{key}"] == value
+
+
+def test_parse_poe_port_config_gs308ep() -> None:
+    """Test PoE config parsing for the GS308EP."""
+    parser = create_page_parser(GS308EP.MODEL_NAME)
+    response = BaseResponse()
+    response.content = Path("pages/GS308EP/1/PoEPortConfig.cgi").read_bytes()
+    data = parser.parse_poe_port_config(response)
+    assert data["port_1_poe_power_active"] == "on"
+    assert data["port_7_poe_power_active"] == "off"
+
+
+def test_get_poe_port_infos_gs308ep() -> None:
+    """Test regrouping of PoE config and status per port."""
+    connector = _offline_connector(GS308EP)
+    connector.sleep_time = 0
+    infos = connector.get_poe_port_infos()
+    assert list(infos) == list(range(1, 9))
+    assert infos[1]["power_active"] == "on"
+    assert infos[1]["status"] == "delivering_power"
+    assert infos[1]["power_delivered"] == "on"
+    assert infos[1]["output_power"] == 6.1
+    assert infos[7]["power_active"] == "off"
+    assert infos[7]["status"] == "disabled"
+    assert not any(key.startswith("port_") for key in infos[1])
+
+
+def test_get_poe_port_infos_raises_without_poe() -> None:
+    """Test that non-PoE models raise NotImplementedError."""
+    connector = _offline_connector(GS308E, sequence=0)
+    with pytest.raises(NotImplementedError):
+        connector.get_poe_port_infos()
+
+
+def test_get_port_infos_gs308ep() -> None:
+    """Test regrouping of port link status, speed and settings."""
+    infos = _offline_connector(GS308EP).get_port_infos()
+    assert list(infos) == list(range(1, 9))
+    assert infos[1]["status"] == "on"
+    assert infos[1]["modus_speed"] is True
+    assert infos[1]["connection_speed"] == 1000
+    assert infos[1]["name"] == "wax610b"
+    assert infos[1]["speed"] == 1
+    assert infos[5]["status"] == "off"
+    assert infos[5]["connection_speed"] == 0
 
 
 if __name__ == "__main__":

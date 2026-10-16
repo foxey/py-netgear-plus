@@ -67,6 +67,49 @@ def get_text_from_next_parent_element(tree: html.HtmlElement, xpath: str) -> str
         raise NetgearPlusPageParserError(message) from error
 
 
+def _labelled_values(element: html.HtmlElement) -> dict[str, str]:
+    """
+    Map hid-txt label ids to their displayed value.
+
+    GS30x pages lay out each cell as a "hid_info_title" div holding the
+    label span, followed by a sibling div holding the value span.
+    """
+    values: dict[str, str] = {}
+    for label in element.xpath('.//div[@class="hid_info_title"]/span[@class]'):
+        title_div = label.getparent()
+        value_div = title_div.getnext() if title_div is not None else None
+        if value_div is None:
+            continue
+        spans = value_div.xpath("./span")
+        text = (spans[0].text if spans else value_div.text) or ""
+        values[(label.text or "").strip()] = text.strip()
+    return values
+
+
+def _to_int(value: str | None) -> int:
+    """Convert a string to int, returning 0 on failure."""
+    try:
+        return int(float(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _to_float(value: str | None) -> float:
+    """Convert a string to float, returning 0.0 on failure."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _parse_poe_class(text: str | None) -> int | None:
+    """Extract PoE class from a 'ml003@4@' style string; None if unknown."""
+    if not text:
+        return None
+    match = re.search(r"@(\d+)@", text)
+    return int(match.group(1)) if match else None
+
+
 def get_text_from_next_element(tree: html.HtmlElement, xpath: str) -> str:
     """Get the first text from an xpath."""
     try:
@@ -935,43 +978,43 @@ class GS30xSeries(PageParser):
         }
 
     def parse_poe_port_config(self, page: Response | BaseResponse) -> dict[str, Any]:
-        """Parse PoE port configuration from the html page."""
+        """Parse PoE port configuration from the html page (web UI "PoE > Config")."""
         switch_data = {}
         tree = html.fromstring(page.content)
-        poe_port_config = {}
-        poe_port_power_x = tree.xpath('//input[@id="hidPortPwr"]')
-        for i, x in enumerate(poe_port_power_x):
-            poe_port_config[i + 1] = "on" if x.value == "1" else "off"
-
-        for poe_port_nr, poe_power_config in poe_port_config.items():
-            switch_data[f"port_{poe_port_nr}_poe_power_active"] = poe_power_config
+        for item in tree.xpath('//li[contains(@class,"poe_port_list_item")]'):
+            port_nr = int(get_first_value(item, './/input[@class="port"]'))
+            power_active = get_first_value(item, './/input[@class="hidPortPwr"]')
+            switch_data[f"port_{port_nr}_poe_power_active"] = (
+                "on" if power_active == "1" else "off"
+            )
         return switch_data
 
     def parse_poe_port_status(self, page: Response | BaseResponse) -> dict[str, Any]:
-        """Parse PoE port status from the html page."""
+        """Parse PoE port status from the html page (web UI "PoE > Status")."""
         switch_data = {}
         tree = html.fromstring(page.content)
-        poe_output_power = {}
-        # Port name:
-        #   //li[contains(@class,"poe_port_list_item")]
-        #       //span[contains(@class,"poe_index_li_title")]
-        # Power mode:
-        #   //li[contains(@class,"poe_port_list_item")]
-        #       //span[contains(@class,"poe-power-mode")]
-        # Port status:
-        #   //li[contains(@class,"poe_port_list_item")]
-        #       //div[contains(@class,"poe_port_status")]
-        poe_output_power_x = tree.xpath(
-            '//li[contains(@class,"poe_port_list_item")]//div[contains(@class,"poe_port_status")]'
-        )
-        for i, x in enumerate(poe_output_power_x):
-            try:
-                poe_output_power[i + 1] = float(x.xpath(".//span")[5].text)
-            except ValueError:
-                poe_output_power[i + 1] = 0.0
+        for item in tree.xpath('//li[contains(@class,"poe_port_list_item")]'):
+            port_nr = int(get_first_value(item, './/input[@class="port"]'))
+            prefix = f"port_{port_nr}_poe"
 
-        for poe_port_nr, poe_power_status in poe_output_power.items():
-            switch_data[f"port_{poe_port_nr}_poe_output_power"] = poe_power_status
+            status = get_first_text(
+                item, './/span[contains(@class,"poe-power-mode")]/span'
+            )
+            status = status.strip().lower().replace(" ", "_")
+            switch_data[f"{prefix}_status"] = status
+            switch_data[f"{prefix}_power_delivered"] = (
+                "on" if status == "delivering_power" else "off"
+            )
+            switch_data[f"{prefix}_class"] = _parse_poe_class(
+                get_first_text(item, './/span[contains(@class,"powClassShow")]')
+            )
+
+            labels = _labelled_values(item)
+            switch_data[f"{prefix}_voltage"] = _to_int(labels.get("ml570"))
+            switch_data[f"{prefix}_current"] = _to_int(labels.get("ml572"))
+            switch_data[f"{prefix}_output_power"] = _to_float(labels.get("ml574"))
+            switch_data[f"{prefix}_temperature"] = _to_int(labels.get("ml575"))
+            switch_data[f"{prefix}_fault"] = labels.get("ml581", "")
         return switch_data
 
     def parse_error(self, page: Response | BaseResponse) -> str | None:
