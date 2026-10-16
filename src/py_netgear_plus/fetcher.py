@@ -82,6 +82,22 @@ class BaseResponse:
         return self.status_code == status_code_ok
 
 
+def _send_request(method: str, url: str, **kwargs: Any) -> Response | BaseResponse:
+    """
+    Skip reading the body of non-200 responses.
+
+    JGS524PE needs few ms for the 404 header but ~10s for the body.
+    """
+    response = requests.request(method, url, stream=True, **kwargs)  # noqa: S113
+    if response.status_code == status_code_ok:
+        _ = response.content  # read body now, as without stream
+        return response
+    result = BaseResponse()
+    result.status_code = response.status_code
+    response.close()
+    return result
+
+
 class PageFetcher:
     """Class to fetch html pages from switch (or file)."""
 
@@ -139,7 +155,7 @@ class PageFetcher:
                     requests.exceptions.ConnectionError,
                     requests.exceptions.ChunkedEncodingError,
                 ):
-                    self._login_page_response = requests.request(
+                    self._login_page_response = _send_request(
                         method, url, allow_redirects=allow_redirects, timeout=timeout
                     )
 
@@ -313,7 +329,7 @@ class PageFetcher:
             headers["Content-Type"] = "text/plain;charset=UTF-8"
             kwargs["data"] = json.dumps(data, separators=(",", ":"))
         try:
-            response = requests.request(method, url, **kwargs)  # noqa: S113
+            response = _send_request(method, url, **kwargs)
         except requests.exceptions.Timeout:
             return BaseResponse()
         except (
@@ -507,7 +523,7 @@ class PageFetcher:
                 timeout,
             )
         try:
-            response = requests.request(method, url, **kwargs)  # noqa: S113
+            response = _send_request(method, url, **kwargs)
         except requests.exceptions.Timeout:
             return response
         except requests.exceptions.ConnectionError as error:
