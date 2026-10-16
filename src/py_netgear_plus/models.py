@@ -1055,6 +1055,17 @@ class JGS524Ev2(JGSxxxSeries):
     ]
 
 
+class JGS524PE(JGSxxxSeries):
+    """Definition for Netgear JGS524PE model."""
+
+    MODEL_NAME = "JGS524PE"
+    PORTS = 24
+    CHECKS_AND_RESULTS: ClassVar = [
+        ("check_login_form_rand", [False]),
+        ("parse_first_script_tag", ["JGS524PE"]),
+    ]
+
+
 class GS116Ev2(JGSxxxSeries):
     """Definition for Netgear GS116Ev2 model."""
 
