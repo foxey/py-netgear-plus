@@ -5,7 +5,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 from py_netgear_plus import InvalidPoEPortError
-from py_netgear_plus.ngp_cli import _poe_status, _print_table, poe_command
+from py_netgear_plus.ngp_cli import (
+    _poe_status,
+    _print_table,
+    parse_commandline,
+    poe_command,
+)
 
 
 def _poe_args(
@@ -105,3 +110,23 @@ def test_print_table(capsys: pytest.CaptureFixture) -> None:
     assert lines[0].startswith("port")
     assert "1" in lines[1]
     assert "on" in lines[1]
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["poe", "status"], {"command": "poe", "poe_action": "status"}),
+        (
+            ["poe", "on", "3"],
+            {"command": "poe", "poe_action": "on", "port": 3},
+        ),
+        (["poe"], {"command": "poe", "poe_action": None}),
+    ],
+)
+def test_parse_commandline_poe_args_match_dispatcher(
+    argv: list[str], expected: dict
+) -> None:
+    """The poe subparser produces the args poe_command/_poe_status expect."""
+    namespace = parse_commandline().parse_args(argv)
+    for key, value in expected.items():
+        assert getattr(namespace, key) == value
