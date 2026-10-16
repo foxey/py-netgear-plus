@@ -18,6 +18,7 @@ You can create a new switch model class by following the structure below:
 ```python
 from typing import ClassVar
 
+
 class GSXYZ(AutodetectedSwitchModel):  # Replace GSXYZ with the actual model name
     """Definition for Netgear GSXYZ model."""
 

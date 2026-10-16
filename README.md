@@ -106,9 +106,10 @@ python3
 ```
 
 ```python
-ip = '192.168.178.68' # replace with IP address of your switch
-p = 'fyce4gKZemkqjDY' # replace with your password
+ip = "192.168.178.68"  # replace with IP address of your switch
+p = "fyce4gKZemkqjDY"  # replace with your password
 import py_netgear_plus
+
 sw = py_netgear_plus.NetgearSwitchConnector(ip, p)
 sw.autodetect_model()
 sw.get_login_cookie()
@@ -117,6 +118,6 @@ data = sw.get_switch_infos()
 print(sw.switch_model.MODEL_NAME)
 print(data["port_1_sum_rx_mbytes"])
 print(data)
-sw.turn_off_poe_port(1) # Supported only on PoE capable models
+sw.turn_off_poe_port(1)  # Supported only on PoE capable models
 sw.turn_on_poe_port(1)
 ```
