@@ -880,6 +880,54 @@ class XS512EM(EMxSeries):
         super().__init__()
 
 
+class GS810EMX(EMxSeries):
+    """Parser for the GS810EMX switch."""
+
+    def __init__(self) -> None:
+        """Initialize the GS810EMX parser."""
+        super().__init__()
+
+    def parse_port_statistics(self, page, ports):
+        """Parse port statistics from the html page.
+
+        The GS810EMX (Nighthawk SX10) gaming GUI renders this table
+        without the 'portID' row class used by other EMx switches.
+        """
+        tree = html.fromstring(page.content)
+        rx = []
+        tx = []
+        crc = []
+
+        page_inputs = tree.xpath('//table[@id="tbl1"]/tr[not(@class)]/td')
+
+        for port_nr in range(ports):
+            try:
+                rx_value = int(page_inputs[port_nr * 4 + 1].text)
+            except (IndexError, ValueError):
+                rx_value = 0
+            rx.append(rx_value)
+            try:
+                tx_value = int(page_inputs[port_nr * 4 + 2].text)
+            except (IndexError, ValueError):
+                tx_value = 0
+            tx.append(tx_value)
+            try:
+                crc_value = int(page_inputs[port_nr * 4 + 3].text)
+            except (IndexError, ValueError):
+                crc_value = 0
+            crc.append(crc_value)
+
+        io_zeros = [0] * ports
+        return {
+            "traffic_rx": rx,
+            "traffic_tx": tx,
+            "sum_rx": rx,
+            "sum_tx": tx,
+            "crc_errors": crc,
+            "speed_io": io_zeros,
+        }
+
+
 class GS30xSeries(PageParser):
     """Parser for the GS30x switch series."""
 

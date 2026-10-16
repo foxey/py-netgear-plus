@@ -543,6 +543,17 @@ class XS512EM(EMxSeries):
     ]
 
 
+class GS810EMX(EMxSeries):
+    """Definition for Netgear GS810EMX (Nighthawk SX10) model."""
+
+    MODEL_NAME = "GS810EMX"
+    PORTS = 10
+    CHECKS_AND_RESULTS: ClassVar = [
+        ("check_login_form_rand", [True]),
+        ("parse_login_title_tag", ["GS810EMX"]),
+    ]
+
+
 class GS30xSeries(AutodetectedSwitchModel):
     """Parent class definition for Netgear GS30x series."""
 
