@@ -14,6 +14,8 @@ ignore = [
     "COM812", # incompatible with formatter
     "ISC001", # incompatible with formatter
     "UP042", # TODO: remove once Python 3.10 support is dropped
+    "CPY001", # TODO: temporary, see issue for proper fix
+    "PLR0917", # TODO: temporary, see issue for proper fix
 ]
 
 [lint.flake8-pytest-style]
