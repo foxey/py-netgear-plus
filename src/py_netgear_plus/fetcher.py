@@ -63,7 +63,11 @@ class BaseResponse:
 
 
 def _send_request(method: str, url: str, **kwargs: Any) -> Response | BaseResponse:
-    """Skip reading the body of non-200 responses. JGS524PE needs few ms for the 404 header but ~10s for the body."""
+    """
+    Skip reading the body of non-200 responses.
+
+    JGS524PE needs few ms for the 404 header but ~10s for the body.
+    """
     response = requests.request(method, url, stream=True, **kwargs)  # noqa: S113
     if response.status_code == status_code_ok:
         _ = response.content  # read body now, as without stream
