@@ -28,6 +28,21 @@ some basic configuration updates.
 | Port {port} Status            | `port_{port}_status`               | "on"/"off"                          |
 | Port {poe_port} POE Power     | `port_{poe_port}_poe_power_active` | "on"/"off"                          |
 
+PoE capable models of the GS30x series (GS305EP/EPP, GS308EP/EPP) also expose per PoE port:
+
+| Name                            | key from `get_switch_infos()`         | Unit                                                   |
+| ------------------------------- | ------------------------------------- | ------------------------------------------------------ |
+| Port {poe_port} POE Status      | `port_{poe_port}_poe_status`          | "delivering_power"/"searching"/"disabled"              |
+| Port {poe_port} POE Delivering  | `port_{poe_port}_poe_power_delivered` | "on"/"off"                                                   |
+| Port {poe_port} POE Class       | `port_{poe_port}_poe_class`           | 0-8 or `None` when no powered device                   |
+| Port {poe_port} POE Voltage     | `port_{poe_port}_poe_voltage`         | V                                                      |
+| Port {poe_port} POE Current     | `port_{poe_port}_poe_current`         | mA                                                     |
+| Port {poe_port} POE Power       | `port_{poe_port}_poe_output_power`    | W                                                      |
+| Port {poe_port} POE Temperature | `port_{poe_port}_poe_temperature`     | °C                                                     |
+| Port {poe_port} POE Fault       | `port_{poe_port}_poe_fault`           | text, "No Error" when fine                             |
+
+`get_port_infos()` and `get_poe_port_infos()` return the same data regrouped per port number.
+
 ### List of aggregated statistics
 
 | Sensor Name             | key from `get_switch_infos()` | Unit                  |
@@ -54,13 +69,15 @@ some basic configuration updates.
 | GS305EP   | 5     | V1.0.1.1                               |                     |
 | GS305EPP  | 5     | V1.0.1.4                               |                     |
 | GS308E    | 8     | V1.00.11                               | V1.00.03            |
-| GS308EP   | 8     | V1.0.0.10, V1.0.1.4                    |                     |
+| GS308EP   | 8     | V1.0.0.10, V1.0.1.4, V2.0.0.5          |                     |
 | GS308EPP  | 8     | V1.0.1.4                               |                     |
 | GS308Ev4  | 8     | V1.0.1.3                               |                     |
 | GS316EP   | 16    | V1.0.4.4                               |                     |
 | GS316EPP  | 16    | V1.0.4.4                               |                     |
 | JGS516PE  | 16    | V2.6.0.48                              |                     |
 | JGS24Ev2  | 24    | V2.6.0.48                              |                     |
+| MS305E    | 5     | v1.0.0.9                               |                     |
+| MS308E    | 8     | v1.0.0.9                               |                     |
 | XS512EM   | 12    | V1.0.2.8                               |                     |
 
 Supported firmware languages: GR (German), EN (English)
@@ -80,6 +97,11 @@ Supported firmware languages: GR (German), EN (English)
 export NETGEAR_PLUS_PASSWORD=s3cr3t # replace with your password
 ngp-cli login 192.168.178.68 # replace with IP address of your switch
 ngp-cli status
+ngp-cli port list        # link status, speed and settings per port
+ngp-cli poe status       # PoE config and live status per port (PoE models)
+ngp-cli poe off 7        # disable / enable / power-cycle PoE on a port
+ngp-cli poe on 7
+ngp-cli poe cycle 7
 ngp-cli logout
 ngp-cli -h
 ```
@@ -104,9 +126,10 @@ python3
 ```
 
 ```python
-ip = '192.168.178.68' # replace with IP address of your switch
-p = 'fyce4gKZemkqjDY' # replace with your password
+ip = "192.168.178.68"  # replace with IP address of your switch
+p = "fyce4gKZemkqjDY"  # replace with your password
 import py_netgear_plus
+
 sw = py_netgear_plus.NetgearSwitchConnector(ip, p)
 sw.autodetect_model()
 sw.get_login_cookie()
@@ -115,6 +138,6 @@ data = sw.get_switch_infos()
 print(sw.switch_model.MODEL_NAME)
 print(data["port_1_sum_rx_mbytes"])
 print(data)
-sw.turn_off_poe_port(1) # Supported only on PoE capable models
+sw.turn_off_poe_port(1)  # Supported only on PoE capable models
 sw.turn_on_poe_port(1)
 ```

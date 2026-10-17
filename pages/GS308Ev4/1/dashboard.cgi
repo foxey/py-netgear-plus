@@ -234,7 +234,7 @@ EDIT
 <i class="mid_title_icon icon_color_gray icon_sm accordion_icon accordion_plus pull-right">
 <span class="icon-expand"></span>
 </i><span class=" padding_r_18 pull-right">
-<span>AVAILABLE</span></span>
+<span class="text-success-1">UP</span></span>
 <span class="index_li_title">
 <input type="hidden" class="port" value="2">
 <span>2</span></span></div>
@@ -252,8 +252,8 @@ EDIT
 <div class="hid_info_title">
 <span class='hid-txt wid-full'>ml382</span></div>
 <div>
-<span>No Speed</span>
-<input type="hidden" class="LinkedSpeed" value="No Speed">
+<span>100M full</span>
+<input type="hidden" class="LinkedSpeed" value="100M full">
 </div>
 </div>
 <div class="hid_info_cell col-xs-12 col-sm-6">

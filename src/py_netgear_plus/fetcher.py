@@ -1,6 +1,9 @@
 """HTML page retrieval classes."""
 
+import json
 import logging
+import re
+from collections.abc import Iterator
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -11,6 +14,7 @@ from lxml import html
 from requests import Response
 
 from py_netgear_plus.models import (
+    MODELS,
     AutodetectedSwitchModel,
     InvalidCryptFunctionError,
     SwitchModelNotDetectedError,
@@ -25,6 +29,23 @@ status_code_no_response = requests.codes.no_response
 status_code_unauthorized = requests.codes.unauthorized
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _normalize_model_identifier(value: Any) -> str:
+    """Return a compact comparable model identifier."""
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+
+def _iter_json_values(value: Any) -> Iterator[Any]:
+    """Yield scalar values from a nested JSON-like structure."""
+    if isinstance(value, dict):
+        for nested_value in value.values():
+            yield from _iter_json_values(nested_value)
+    elif isinstance(value, list):
+        for nested_value in value:
+            yield from _iter_json_values(nested_value)
+    elif value is not None:
+        yield value
 
 
 class PageFetcherConnectionError(Exception):
@@ -65,6 +86,22 @@ class BaseResponse:
         return self.status_code == status_code_ok
 
 
+def _send_request(method: str, url: str, **kwargs: Any) -> Response | BaseResponse:
+    """
+    Skip reading the body of non-200 responses.
+
+    JGS524PE needs few ms for the 404 header but ~10s for the body.
+    """
+    response = requests.request(method, url, stream=True, **kwargs)  # noqa: S113
+    if response.status_code == status_code_ok:
+        _ = response.content  # read body now, as without stream
+        return response
+    result = BaseResponse()
+    result.status_code = response.status_code
+    response.close()
+    return result
+
+
 class PageFetcher:
     """Class to fetch html pages from switch (or file)."""
 
@@ -78,6 +115,9 @@ class PageFetcher:
         # login cookie
         self._cookie_name = None
         self._cookie_content = None
+
+        # bearer token (JSON REST API switches)
+        self._bearer_token = None
 
         # offline mode settings
         self.offline_mode = False
@@ -119,7 +159,7 @@ class PageFetcher:
                     requests.exceptions.ConnectionError,
                     requests.exceptions.ChunkedEncodingError,
                 ):
-                    self._login_page_response = requests.request(
+                    self._login_page_response = _send_request(
                         method, url, allow_redirects=allow_redirects, timeout=timeout
                     )
 
@@ -153,10 +193,161 @@ class PageFetcher:
         self._cookie_name = None
         self._cookie_content = None
 
+    def set_bearer_token(self, token: str) -> None:
+        """Set Bearer token for JSON REST API authentication."""
+        self._bearer_token = token
+
+    def has_bearer_token(self) -> bool:
+        """Return True if a Bearer token is set."""
+        return self._bearer_token is not None
+
+    def clear_bearer_token(self) -> None:
+        """Clear Bearer token."""
+        self._bearer_token = None
+
+    def _parse_json_body(
+        self, response: Response | BaseResponse
+    ) -> dict[str, Any] | None:
+        """Return response JSON when it is a dictionary."""
+        try:
+            body = response.json()
+        except (AttributeError, ValueError):
+            return None
+        if not isinstance(body, dict):
+            return None
+        return body
+
+    def _prepare_json_response(
+        self, url: str, response: Response | BaseResponse, request_data: Any = None
+    ) -> None:
+        """Prepare JSON API responses for login retry and model detection."""
+        body = self._parse_json_body(response)
+        if body is None:
+            return
+
+        # Some MS-series firmware returns HTTP 200 with an error payload when an
+        # endpoint needs authentication. Treat that as unauthorized so callers
+        # retry after JSON REST login.
+        err_code = body.get("errCode")
+        if (
+            request_data is None
+            and not self._bearer_token
+            and err_code
+            not in (
+                None,
+                0,
+                "0",
+            )
+        ):
+            _LOGGER.debug(
+                "[PageFetcher.json_request] JSON API endpoint %s returned errCode=%s "
+                "without a bearer token; retrying after login.",
+                url,
+                err_code,
+            )
+            response.status_code = status_code_unauthorized
+            return
+
+        self._normalize_json_status_model(url, response, body)
+
+    def _normalize_json_status_model(
+        self, url: str, response: Response | BaseResponse, body: dict[str, Any]
+    ) -> None:
+        """Normalize JSON REST status model info for autodetection."""
+        if "/api/system/status" not in url:
+            return
+
+        system_info = body.get("systemInfo")
+        if not isinstance(system_info, dict):
+            system_info = {}
+            body["systemInfo"] = system_info
+
+        candidate_values = [
+            system_info.get("modelNumber"),
+            system_info.get("modelName"),
+            system_info.get("productName"),
+            body.get("modelNumber"),
+            body.get("modelName"),
+            body.get("productName"),
+            body.get("deviceName"),
+        ]
+        candidate_values.extend(_iter_json_values(body))
+
+        json_api_models = []
+        for mdl_cls in MODELS:
+            mdl = mdl_cls()
+            if getattr(mdl, "API_TYPE", "") == "json_rest":
+                json_api_models.append(mdl)
+
+        for candidate_value in candidate_values:
+            normalized_candidate = _normalize_model_identifier(candidate_value)
+            if not normalized_candidate:
+                continue
+            for model in json_api_models:
+                normalized_model = _normalize_model_identifier(model.MODEL_NAME)
+                if normalized_model and normalized_model in normalized_candidate:
+                    if system_info.get("modelNumber") != model.MODEL_NAME:
+                        _LOGGER.debug(
+                            "[PageFetcher.json_request] Normalized JSON REST model "
+                            "value %r to %s for IP=%s",
+                            candidate_value,
+                            model.MODEL_NAME,
+                            self.host,
+                        )
+                    system_info["modelNumber"] = model.MODEL_NAME
+                    if isinstance(response, Response):
+                        response._content = json.dumps(  # noqa: SLF001
+                            body, separators=(",", ":")
+                        ).encode("utf-8")
+                    return
+
+        _LOGGER.debug(
+            "[PageFetcher.json_request] JSON REST status response for IP=%s did "
+            "not contain a known model. top_level_keys=%s system_info_keys=%s",
+            self.host,
+            sorted(body.keys()),
+            sorted(system_info.keys()),
+        )
+
+    def json_request(
+        self,
+        method: str,
+        url: str,
+        data: Any = None,
+    ) -> Response | BaseResponse:
+        """Make a JSON REST API request with optional Bearer token auth."""
+        if self.offline_mode:
+            response = self.get_page_from_file(url)
+            self._prepare_json_response(url, response, data)
+            return response
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+        }
+        if self._bearer_token:
+            headers["Authorization"] = f"Bearer {self._bearer_token}"
+        kwargs: dict[str, Any] = {
+            "headers": headers,
+            "timeout": URL_REQUEST_TIMEOUT,
+        }
+        if data is not None:
+            headers["Content-Type"] = "text/plain;charset=UTF-8"
+            kwargs["data"] = json.dumps(data, separators=(",", ":"))
+        try:
+            response = _send_request(method, url, **kwargs)
+        except requests.exceptions.Timeout:
+            return BaseResponse()
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.ChunkedEncodingError,
+        ) as error:
+            raise PageFetcherConnectionError from error
+        self._prepare_json_response(url, response, data)
+        return response
+
     def get_page_from_file(self, url: str) -> BaseResponse:
         """Get page from file."""
         response = BaseResponse()
-        page_name = url.split("/")[-1] or DEFAULT_PAGE
+        page_name = url.rsplit(sep="/", maxsplit=1)[-1] or DEFAULT_PAGE
         path = Path(f"{self.offline_path_prefix}/{page_name}")
         if path.exists():
             with path.open("r") as file:
@@ -243,7 +434,11 @@ class PageFetcher:
         """Check for redirect to login when not authenticated (anymore)."""
         if "content" in dir(response) and response.content:
             title = html.fromstring(response.content).xpath("//title")
-            if len(title) and title[0].text.lower() == "redirect to login":
+            if (
+                len(title)
+                and title[0].text
+                and title[0].text.lower() == "redirect to login"
+            ):
                 _LOGGER.info(
                     "[PageFetcher._is_authenticated] Returning false: title=%s",
                     title[0].text.lower(),
@@ -252,7 +447,11 @@ class PageFetcher:
             script = html.fromstring(response.content).xpath(
                 '//script[contains(text(),"/wmi/login")]'
             )
-            if len(script) > 0 and 'top.location.href = "/wmi/login"' in script[0].text:
+            if (
+                len(script) > 0
+                and script[0].text
+                and 'top.location.href = "/wmi/login"' in script[0].text
+            ):
                 _LOGGER.info(
                     "[PageFetcher._is_authenticated] Returning false: script=%s",
                     script[0].text,
@@ -260,13 +459,14 @@ class PageFetcher:
                 return False
         return True
 
-    def request(
+    def request(  # noqa: PLR0913
         self,
         method: str,
         url: str,
         data: Any = None,
         timeout: int = 0,
         allow_redirects: bool = False,  # noqa: FBT001, FBT002
+        headers: dict[str, str] | None = None,
     ) -> Response | BaseResponse:
         """Make authenticated requests with requests.request."""
         if self.offline_mode:
@@ -278,7 +478,19 @@ class PageFetcher:
         data_key = "data" if method == "post" else "params"
         if self._cookie_name and self._cookie_content:
             jar = requests.cookies.RequestsCookieJar()
-            jar.set(self._cookie_name, self._cookie_content, domain=self.host, path="/")
+            if ":" in self.host:
+                host_only, port_only = self.host.split(":")
+                jar.set(
+                    self._cookie_name,
+                    self._cookie_content,
+                    domain=host_only,
+                    path="/",
+                    port=port_only,
+                )
+            else:
+                jar.set(
+                    self._cookie_name, self._cookie_content, domain=self.host, path="/"
+                )
             kwargs = {
                 data_key: data,
                 "cookies": jar,
@@ -302,6 +514,8 @@ class PageFetcher:
                 "allow_redirects": allow_redirects,
                 "timeout": timeout,
             }
+        if headers:
+            kwargs["headers"] = headers
             _LOGGER.debug(
                 "[PageFetcher.request] calling %s %s without cookie"
                 " with %s=%s, allow_redirects=%s, timeout=%d",
@@ -313,7 +527,7 @@ class PageFetcher:
                 timeout,
             )
         try:
-            response = requests.request(method, url, **kwargs)  # noqa: S113
+            response = _send_request(method, url, **kwargs)
         except requests.exceptions.Timeout:
             return response
         except requests.exceptions.ConnectionError as error:
