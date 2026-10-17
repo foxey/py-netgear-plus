@@ -1487,7 +1487,8 @@ class GS116Ev2(JGSxxxSeries):
 
 
 class MS108EUP(GS31xSeries):
-    """Parser for the MS108EUP switch (Multi-Gig 8-Port PoE++ Ultra60).
+    """
+    Parser for the MS108EUP switch (Multi-Gig 8-Port PoE++ Ultra60).
 
     This switch uses a similar interface to the GS316 series with Gambit
     authentication. The HTML structure follows the same patterns as GS31xSeries.
@@ -1504,7 +1505,8 @@ class MS108EUP(GS31xSeries):
         super().__init__()
 
     def parse_led_status(self, page: Response | BaseResponse) -> dict[str, Any]:
-        """Parse status of the front panel LEDs from the html page.
+        """
+        Parse status of the front panel LEDs from the html page.
 
         MS108EUP uses 'portLedStatus' checkbox instead of 'ledStatus'.
         The checkbox has 'checked' attribute when LEDs are on.

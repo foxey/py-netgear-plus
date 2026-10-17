@@ -417,10 +417,11 @@ class NetgearSwitchConnector:
                 " [IP: %s] Maximum sessions reached on switch",
                 self.host,
             )
-            raise MaxSessionsError(
+            msg = (
                 "Maximum number of sessions reached. "
                 "Please log out of the switch's web interface or restart the switch."
             )
+            raise MaxSessionsError(msg)
 
         if error_msg:
             _LOGGER.warning(

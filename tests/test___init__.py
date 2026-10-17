@@ -24,6 +24,7 @@ from py_netgear_plus.models import (
     GS316EPP,
     GSS108E,
     JGS516PE,
+    MS108EUP,
     MS305E,
     MS308E,
     XS512EM,
@@ -89,6 +90,12 @@ MODEL_PARAMETERS = [
         '<html><input name="Gambit" value="cookie_value"></html>',
     ),
     (GSS108E, "2082437949", "1c0714cfd1c8595db5ba36ceae43b134", "<html></html>"),
+    (
+        MS108EUP,
+        "514134199",
+        "f28f4fc0b150997b3276763a33e0d058",
+        '<html><input name="Gambit" value="cookie_value"></html>',
+    ),
 ]
 # Add models without a full set of pages with pytest.param(GSXYZ,
 #   marks=pytest.mark.xfail(reason="no valid data pages"))
@@ -109,6 +116,7 @@ MODELS_FOR_GET_SWITCH_INFOS = [
     JGS524Ev2,
     XS512EM,
     GSS108E,
+    MS108EUP,
 ]
 
 # List of models for reboot test, with
