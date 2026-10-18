@@ -2,6 +2,12 @@
 
 target-version = "py312"
 
+# pages/ holds captured switch fixture data; any .py files there are
+# standalone debug/capture helpers for contributors, not shipped source.
+# .md files there may embed example code snippets that aren't meant to be
+# formatted/linted as part of the package.
+extend-exclude = ["pages/**/*.py", "pages/**/*.md"]
+
 [lint]
 select = [
     "ALL",

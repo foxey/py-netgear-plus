@@ -3,4 +3,3 @@ hatchling==1.32.4
 build==1.6.1
 pytest==9.1.1
 pytest-cov==7.1.0
-
