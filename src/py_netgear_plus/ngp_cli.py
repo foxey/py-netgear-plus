@@ -21,6 +21,10 @@ Commands:
     vlan              Manage VLAN configuration (sub: status/mode/add/edit/
                         remove/pvid/apply).
     led               Control front panel LEDs (sub: on/off/status).
+    poe status        Show PoE config and live status per port.
+    poe on <port>     Enable PoE on a port.
+    poe off <port>    Disable PoE on a port.
+    poe cycle <port>  Power-cycle a PoE port.
 
 Options:
     --password, -P    Specify the password for the switch. If not provided,
@@ -47,6 +51,7 @@ from sys import stderr
 from typing import Any
 
 from py_netgear_plus import (
+    InvalidPoEPortError,
     LoginFailedError,
     NetgearSwitchConnector,
     SwitchModelNotDetectedError,
@@ -134,6 +139,7 @@ def main() -> None:
         "network": network_command,
         "password": password_command,
         "led": led_command,
+        "poe": poe_command,
     }
 
     if args.command in command_functions:
@@ -214,6 +220,7 @@ def parse_commandline() -> argparse.ArgumentParser:
     _add_network_subparser(subparsers)
     _add_password_subparser(subparsers)
     _add_led_subparser(subparsers)
+    _add_poe_subparser(subparsers)
 
     return parser
 
@@ -292,6 +299,19 @@ def _add_network_subparser(subparsers: argparse._SubParsersAction) -> None:
         metavar=("IP", "MASK", "GATEWAY"),
         help="Static IP / subnet mask / gateway",
     )
+
+
+def _add_poe_subparser(subparsers: argparse._SubParsersAction) -> None:
+    poe_parser = subparsers.add_parser("poe", help="PoE information and control")
+    poe_sub = poe_parser.add_subparsers(dest="poe_action")
+    poe_sub.add_parser("status", help="Show PoE config and status per port")
+    for verb, text in (
+        ("on", "Enable PoE on a port"),
+        ("off", "Disable PoE on a port"),
+        ("cycle", "Power-cycle a PoE port"),
+    ):
+        sp = poe_sub.add_parser(verb, help=text)
+        sp.add_argument("port", type=int, help="Port number (1-based)")
 
 
 def command_chooser(
@@ -476,6 +496,122 @@ def reboot_command(connector: NetgearSwitchConnector, args: argparse.Namespace) 
     return False
 
 
+def _prepare(connector: NetgearSwitchConnector) -> bool:
+    """Load cookie, autodetect model and fetch metadata (client hash)."""
+    if not load_cookie(connector):
+        print("Not logged in.", file=stderr)  # noqa: T201
+        return False
+    try:
+        connector.autodetect_model()
+    except SwitchModelNotDetectedError:
+        print("Could not autodetect switch model.", file=stderr)  # noqa: T201
+        return False
+    connector._get_switch_metadata()  # noqa: SLF001
+    return True
+
+
+def _print_table(header: list[str], rows: list[list[Any]]) -> None:
+    """Print rows as an aligned text table."""
+    cells = [header, *[[str(c) for c in row] for row in rows]]
+    widths = [max(len(row[i]) for row in cells) for i in range(len(header))]
+    for row in cells:
+        print("  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)))  # noqa: T201
+
+
+def _port_list(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Print link status, speed and settings per port as table or JSON."""
+    ports = connector.get_port_infos()
+    if args.json:
+        print(json.dumps(ports, indent=4))  # noqa: T201
+        return True
+    columns = [
+        ("port", None),
+        ("name", "name"),
+        ("link", "status"),
+        ("speed_mbps", "connection_speed"),
+        ("auto_neg", "modus_speed"),
+        ("speed_cfg", "speed"),
+        ("ingress", "ingress_rate"),
+        ("egress", "egress_rate"),
+        ("flow_ctrl", "flow_control"),
+    ]
+    rows = [
+        [nr, *[info.get(key, "-") for _, key in columns[1:]]]
+        for nr, info in ports.items()
+    ]
+    _print_table([name for name, _ in columns], rows)
+    return True
+
+
+def _poe_status(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Print PoE status table or JSON."""
+    poe = connector.get_poe_port_infos()
+    if args.json:
+        print(json.dumps(poe, indent=4))  # noqa: T201
+        return True
+    header = [
+        "port",
+        "enabled",
+        "delivering",
+        "status",
+        "class",
+        "volts",
+        "mA",
+        "watts",
+        "temp_c",
+        "fault",
+    ]
+    rows = [
+        [
+            nr,
+            info["power_active"],
+            info["power_delivered"],
+            info["status"],
+            "-" if info["class"] is None else info["class"],
+            info["voltage"],
+            info["current"],
+            info["output_power"],
+            info["temperature"],
+            info["fault"],
+        ]
+        for nr, info in poe.items()
+    ]
+    _print_table(header, rows)
+    return True
+
+
+def poe_command(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
+    """Dispatch PoE subcommands."""
+    if not args.poe_action:
+        print("poe: missing subcommand (status/on/off/cycle)", file=stderr)  # noqa: T201
+        return False
+    if not _prepare(connector):
+        return False
+    if not connector.switch_model.POE_PORTS:
+        print(  # noqa: T201
+            f"PoE not supported on {connector.switch_model.MODEL_NAME}.",
+            file=stderr,
+        )
+        return False
+
+    if args.poe_action == "status":
+        return _poe_status(connector, args)
+
+    actions = {
+        "on": connector.turn_on_poe_port,
+        "off": connector.turn_off_poe_port,
+        "cycle": connector.power_cycle_poe_port,
+    }
+    try:
+        ok = actions[args.poe_action](args.port)
+    except InvalidPoEPortError as exc:
+        print(str(exc), file=stderr)  # noqa: T201
+        return False
+    if not ok:
+        print(f"poe {args.poe_action} {args.port} failed.", file=stderr)  # noqa: T201
+    return ok
+
+
 def version_command() -> bool:
     """Display CLI version."""
     print(f"Netgear Plus CLI version: {ngp_version}")  # noqa: T201
@@ -598,26 +734,16 @@ def port_command(  # noqa: PLR0911
     except SwitchModelNotDetectedError:
         print("Could not autodetect switch model.", file=stderr)  # noqa: T201
         return False
+    connector._get_switch_metadata()  # noqa: SLF001
+    if args.port_action == "list":
+        return _port_list(connector, args)
     if not connector.switch_model.has_port_naming():
         print(  # noqa: T201
             f"Port naming not supported on {connector.switch_model.MODEL_NAME}.",
             file=stderr,
         )
         return False
-    connector._get_switch_metadata()  # noqa: SLF001
     try:
-        if args.port_action == "list":
-            settings = connector.get_port_settings()
-            if args.json:
-                print(json.dumps(settings, indent=4, default=str))  # noqa: T201
-            else:
-                for p, s in settings.items():
-                    print(  # noqa: T201
-                        f"  {p}: name='{s['name']}' speed={s['speed']} "
-                        f"ingress={s['ingress_rate']} egress={s['egress_rate']} "
-                        f"flow_ctrl={s['flow_control']}"
-                    )
-            return True
         if args.port_action == "rename":
             return connector.set_port_name(args.port, args.name)
     except NotImplementedError as exc:

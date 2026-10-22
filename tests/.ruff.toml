@@ -17,6 +17,8 @@ ignore = [
     "S105",    # Possible hardcoded password
     "S106",    # Possible hardcoded password assigned to argument
     "SLF001",  # Private member accessed outside class
+    "CPY001",  # TODO: temporary, see issue for proper fix
+    "PLR0917", # TODO: temporary, see issue for proper fix
 ]
 
 [lint.flake8-pytest-style]

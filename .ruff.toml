@@ -2,6 +2,12 @@
 
 target-version = "py312"
 
+# pages/ holds captured switch fixture data; any .py files there are
+# standalone debug/capture helpers for contributors, not shipped source.
+# .md files there may embed example code snippets that aren't meant to be
+# formatted/linted as part of the package.
+extend-exclude = ["pages/**/*.py", "pages/**/*.md"]
+
 [lint]
 select = [
     "ALL",
@@ -14,6 +20,8 @@ ignore = [
     "COM812", # incompatible with formatter
     "ISC001", # incompatible with formatter
     "UP042", # TODO: remove once Python 3.10 support is dropped
+    "CPY001", # TODO: temporary, see issue for proper fix
+    "PLR0917", # TODO: temporary, see issue for proper fix
 ]
 
 [lint.flake8-pytest-style]

@@ -10,6 +10,7 @@ from typing import Any
 from .fetcher import (
     BaseResponse,
     LoginFailedError,
+    MaxSessionsError,
     NotLoggedInError,
     PageFetcher,
     PageFetcherConnectionError,
@@ -28,7 +29,7 @@ from .models import (
 )
 from .parsers import NetgearPlusPageParserError, create_page_parser
 
-__version__ = "0.6.4"
+__version__ = "0.7.0"
 
 DEFAULT_PAGE = "index.htm"
 MAX_AUTHENTICATION_FAILURES = 3
@@ -38,6 +39,16 @@ SWITCH_STATES = ["on", "off"]
 FLOW_CONTROL = ["Enable", "Disable"]
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _group_by_port(flat: dict[str, Any], prefix: str = "") -> dict[int, dict[str, Any]]:
+    """Regroup flat "port_{n}_{prefix}{key}" entries into {n: {key: value}}."""
+    grouped: dict[int, dict[str, Any]] = {}
+    for key, value in flat.items():
+        _, port_nr, name = key.split("_", 2)
+        if name.startswith(prefix):
+            grouped.setdefault(int(port_nr), {})[name[len(prefix) :]] = value
+    return grouped
 
 
 def _from_bytes_to_megabytes(v: float) -> float:
@@ -358,6 +369,21 @@ class NetgearSwitchConnector:
 
         # Handling Error Messages
         error_msg = self._page_parser.parse_error(response)
+        response_text = response.content.decode("utf-8").lower()
+
+        # Check for maximum sessions error
+        if "maximum" in response_text and "session" in response_text:
+            _LOGGER.warning(
+                "[NetgearSwitchConnector.handle_soft_authentication_failure]"
+                " [IP: %s] Maximum sessions reached on switch",
+                self.host,
+            )
+            msg = (
+                "Maximum number of sessions reached. "
+                "Please log out of the switch's web interface or restart the switch."
+            )
+            raise MaxSessionsError(msg)
+
         if error_msg:
             _LOGGER.warning(
                 "[NetgearSwitchConnector.handle_soft_authentication_failure]"
@@ -622,9 +648,35 @@ class NetgearSwitchConnector:
 
         if len(self.switch_model.POE_PORTS):
             time.sleep(self.sleep_time)
-            switch_data.update(self._get_poe_port_config())
+            try:
+                switch_data.update(self._get_poe_port_config())
+            except PageNotLoadedError:
+                _LOGGER.warning(
+                    "[NetgearSwitchConnector.get_switch_infos] "
+                    "Failed to fetch PoE port config for %s, skipping",
+                    self.host,
+                )
+            except PageFetcherConnectionError:
+                _LOGGER.warning(
+                    "[NetgearSwitchConnector.get_switch_infos] "
+                    "Connection error fetching PoE port config for %s, skipping",
+                    self.host,
+                )
             time.sleep(self.sleep_time)
-            switch_data.update(self._get_poe_port_status())
+            try:
+                switch_data.update(self._get_poe_port_status())
+            except PageNotLoadedError:
+                _LOGGER.warning(
+                    "[NetgearSwitchConnector.get_switch_infos] "
+                    "Failed to fetch PoE port status for %s, skipping",
+                    self.host,
+                )
+            except PageFetcherConnectionError:
+                _LOGGER.warning(
+                    "[NetgearSwitchConnector.get_switch_infos] "
+                    "Connection error fetching PoE port status for %s, skipping",
+                    self.host,
+                )
 
         # set previous data
         self._previous_timestamp = time.perf_counter()
@@ -858,16 +910,62 @@ class NetgearSwitchConnector:
         )
         return self._page_parser.parse_poe_port_status(response)
 
-    def _get_port_status(self) -> dict:
-        switch_data = {}
+    def get_poe_port_infos(self) -> dict[int, dict[str, Any]]:
+        """
+        Return PoE configuration and live status per PoE port.
+
+        Result is keyed by port number, e.g.
+        {1: {"power_active": "on", "status": "delivering_power",
+             "power_delivered": "on", "output_power": 6.1, ...}}.
+        """
+        if not self.switch_model:
+            self.autodetect_model()
+        if not self.switch_model.POE_PORTS:
+            message = f"{self.switch_model.MODEL_NAME} has no PoE ports."
+            raise NotImplementedError(message)
+        flat = self._get_poe_port_config()
+        time.sleep(self.sleep_time)
+        flat.update(self._get_poe_port_status())
+        return _group_by_port(flat, "poe_")
+
+    def get_port_infos(self) -> dict[int, dict[str, Any]]:
+        """
+        Return link status, speed and (where supported) settings per port.
+
+        Result is keyed by port number, e.g.
+        {1: {"status": "on", "modus_speed": True, "connection_speed": 1000,
+             "name": "cam", "speed": 1, "ingress_rate": 1, "egress_rate": 1,
+             "flow_control": 2}}.
+        """
+        if not self.switch_model:
+            self.autodetect_model()
         if self._is_json_api:
-            response_portstatus = self._json_api_fetch(
-                self.switch_model.PORT_STATUS_TEMPLATES
-            )
-        else:
-            response_portstatus = self.fetch_page_from_templates(
-                self.switch_model.PORT_STATUS_TEMPLATES
-            )
+            return _group_by_port(self._get_port_status())
+        response = self.fetch_page_from_templates(
+            self.switch_model.PORT_STATUS_TEMPLATES
+        )
+        infos = _group_by_port(self._get_port_status(response))
+        if self.switch_model.PORT_SETTINGS_TEMPLATES:
+            for port_nr, settings in self._page_parser.parse_port_settings(
+                response
+            ).items():
+                for key, value in settings.items():
+                    infos.setdefault(port_nr, {}).setdefault(key, value)
+        return infos
+
+    def _get_port_status(
+        self, response_portstatus: Response | BaseResponse | None = None
+    ) -> dict:
+        switch_data = {}
+        if response_portstatus is None:
+            if self._is_json_api:
+                response_portstatus = self._json_api_fetch(
+                    self.switch_model.PORT_STATUS_TEMPLATES
+                )
+            else:
+                response_portstatus = self.fetch_page_from_templates(
+                    self.switch_model.PORT_STATUS_TEMPLATES
+                )
         port_status = self._page_parser.parse_port_status(
             response_portstatus, self.ports
         )
