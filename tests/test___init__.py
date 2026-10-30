@@ -18,6 +18,7 @@ from py_netgear_plus.models import (
     GS105PE,
     GS110EMX,
     GS305E,
+    GS810EMX,
     GS308E,
     GS308EP,
     GS308EPP,
@@ -89,6 +90,12 @@ MODEL_PARAMETERS = [
         "6ca0965e7a44ee17eec5d575c8c56dd8",
         '<html><input name="Gambit" value="cookie_value"></html>',
     ),
+    (
+        GS810EMX,
+        "1599815442",
+        "31530bbaa7be64c61f98017f7a112b6e",
+        '<html><input name="Gambit" value="cookie_value"></html>',
+    ),
     (GSS108E, "2082437949", "1c0714cfd1c8595db5ba36ceae43b134", "<html></html>"),
     (
         MS108EUP,
@@ -115,6 +122,7 @@ MODELS_FOR_GET_SWITCH_INFOS = [
     JGS516PE,
     JGS524Ev2,
     XS512EM,
+    GS810EMX,
     GSS108E,
     MS108EUP,
 ]
