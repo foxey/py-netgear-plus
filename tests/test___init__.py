@@ -28,6 +28,7 @@ from py_netgear_plus.models import (
     MS305E,
     MS308E,
     XS512EM,
+    XS716E,
     AutodetectedSwitchModel,
     GS105Ev2,
     GS108Ev3,
@@ -90,6 +91,8 @@ MODEL_PARAMETERS = [
         '<html><input name="Gambit" value="cookie_value"></html>',
     ),
     (GSS108E, "2082437949", "1c0714cfd1c8595db5ba36ceae43b134", "<html></html>"),
+    # XS716E has no rand value; crypted password = hex_hmac_md5("Password1").
+    (XS716E, None, "26fe7cce1e480dd05e7f76155579d3ed", "<html></html>"),
     (
         MS108EUP,
         "514134199",
@@ -115,6 +118,7 @@ MODELS_FOR_GET_SWITCH_INFOS = [
     JGS516PE,
     JGS524Ev2,
     XS512EM,
+    XS716E,
     GSS108E,
     MS108EUP,
 ]
@@ -340,30 +344,30 @@ def test_get_login_cookie(
     connector.turn_on_offline_mode(f"pages/{switch_model.MODEL_NAME}/0")
     connector.autodetect_model()
     connector._page_fetcher.check_login_url(connector.switch_model)
+    login_page_response = connector._page_fetcher.get_login_page_response()
     connector.turn_on_online_mode()
 
-    key = next(
-        (
-            k
-            for k, v in connector.switch_model.LOGIN_TEMPLATE["params"].items()
-            if v == "_password_hash"
-        ),
-        None,
-    )
-
+    # Build the expected POST body the same way PageFetcher.set_data_from_template
+    # does, straight from LOGIN_TEMPLATE["params"].
     crypt_function = switch_model.CRYPT_FUNCTION
-    if crypt_function == "hex_hmac_md5":
-        data = {
-            "submitId": "pwdLogin",
-            key: hex_hmac_md5(connector._password),
-            "submitEnd": "",
-        }
-    elif crypt_function == "merge_hash":
-        data = {
-            key: merge_hash(connector._password, rand),
-        }
-    else:
-        pytest.fail(f"Unknown crypt function {crypt_function}")
+    data = {}
+    login_params = connector.switch_model.LOGIN_TEMPLATE["params"]
+    for param_key, param_value in login_params.items():
+        if param_value.startswith("literal:"):
+            data[param_key] = param_value[len("literal:") :]
+        elif param_value == "_password_hash":
+            if crypt_function == "hex_hmac_md5":
+                data[param_key] = hex_hmac_md5(connector._password)
+            elif crypt_function == "merge_hash":
+                data[param_key] = merge_hash(connector._password, rand)
+            else:
+                pytest.fail(f"Unknown crypt function {crypt_function}")
+        elif param_value == "_login_csrf_token":
+            data[param_key] = connector._page_parser.parse_login_csrf_token(
+                login_page_response
+            )
+        else:
+            data[param_key] = getattr(connector._page_fetcher, param_value)
 
     with (
         patch("py_netgear_plus.fetcher.requests.request") as mock_request,
@@ -372,7 +376,11 @@ def test_get_login_cookie(
         mock_response.status_code = requests.codes.ok
         mock_response.content = content
         mock_response.cookies.get.return_value = "cookie_value"
-        mock_request.return_value = mock_response
+        # get_login_cookie() now always re-fetches the login page first (to pick
+        # up a fresh csrftoken/rand) before POSTing credentials: hand back the
+        # real offline-mode login page for that GET, and the mocked response
+        # (built from this test's "content" param) for the login POST.
+        mock_request.side_effect = [login_page_response, mock_response]
         assert connector.get_login_cookie() is True
         mock_request.assert_called()
         mock_request.assert_called_with(
@@ -399,6 +407,10 @@ def test_get_login_cookie(
         ("GS308EPP/0/portStatistics.cgi", True),
         ("GS316EPP/unauthenticated.html", False),
         ("GS316EPP/0/dashboard.html", True),
+        ("XS716E/unauthenticated.html", False),
+        ("XS716E/0/system.htm", True),
+        ("XS716E/0/portconf.htm", True),
+        ("XS716E/0/statist.htm", True),
     ],
 )
 def test_is_authenticated(page: str, expected: bool) -> None:  # noqa: FBT001
