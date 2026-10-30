@@ -451,8 +451,11 @@ class NetgearSwitchConnector:
             if self._page_fetcher.has_bearer_token():
                 return True
             return self._json_api_login()
-        if not self._page_fetcher.get_login_page_response():
-            self._page_fetcher.check_login_url(self.switch_model)
+        # Always fetch a fresh login page: some models (e.g. XS716E) embed a
+        # one-time csrftoken that is invalidated once used, so reusing a
+        # cached login page from an earlier successful login makes every
+        # subsequent re-login after a session timeout fail silently.
+        self._page_fetcher.check_login_url(self.switch_model)
         rand = self._page_parser.parse_login_form_rand(
             self._page_fetcher.get_login_page_response()
         )
