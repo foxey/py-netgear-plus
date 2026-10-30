@@ -111,6 +111,8 @@ class PageFetcher:
         # cached login page response
         self._login_page_response = None
         self._password_hash = None
+        # csrftoken hidden field from the login form (models that require it)
+        self._login_csrf_token = None
 
         # login cookie
         self._cookie_name = None
@@ -176,6 +178,7 @@ class PageFetcher:
         """Return cached login page."""
         self._login_page_response = None
         self._password_hash = None
+        self._login_csrf_token = None
 
     def get_cookie(self) -> tuple[str | None, str | None]:
         """Get cookie."""
@@ -395,10 +398,13 @@ class PageFetcher:
         switch_model: type[AutodetectedSwitchModel],
         login_password: str,
         rand: str | None,
+        csrf_token: str | None = None,
     ) -> Response | BaseResponse:
         """Login and save returned cookie."""
         if not switch_model or switch_model.MODEL_NAME == "":
             raise SwitchModelNotDetectedError
+        # Made available to LOGIN_TEMPLATE params as "_login_csrf_token".
+        self._login_csrf_token = csrf_token
         if switch_model.CRYPT_FUNCTION == "merge_hash" and not rand:
             self._password_hash = login_password
             _LOGGER.debug(
@@ -444,19 +450,22 @@ class PageFetcher:
                     title[0].text.lower(),
                 )
                 return False
-            script = html.fromstring(response.content).xpath(
-                '//script[contains(text(),"/wmi/login")]'
-            )
-            if (
-                len(script) > 0
-                and script[0].text
-                and 'top.location.href = "/wmi/login"' in script[0].text
-            ):
-                _LOGGER.info(
-                    "[PageFetcher._is_authenticated] Returning false: script=%s",
-                    script[0].text,
+            # A session-expired page bounces to the login form via JS. GS30x and
+            # GS31x use the path /wmi/login; XS716E uses /login.htm.
+            for login_path in ("/wmi/login", "/login.htm"):
+                script = html.fromstring(response.content).xpath(
+                    f'//script[contains(text(),"{login_path}")]'
                 )
-                return False
+                if (
+                    len(script) > 0
+                    and script[0].text
+                    and f'location.href = "{login_path}"' in script[0].text
+                ):
+                    _LOGGER.info(
+                        "[PageFetcher._is_authenticated] Returning false: script=%s",
+                        script[0].text,
+                    )
+                    return False
         return True
 
     def request(  # noqa: PLR0913

@@ -456,9 +456,12 @@ class NetgearSwitchConnector:
         rand = self._page_parser.parse_login_form_rand(
             self._page_fetcher.get_login_page_response()
         )
+        csrf_token = self._page_parser.parse_login_csrf_token(
+            self._page_fetcher.get_login_page_response()
+        )
 
         response = self._page_fetcher.get_login_response(
-            self.switch_model, self._password, rand
+            self.switch_model, self._password, rand, csrf_token
         )
 
         _LOGGER.debug(
