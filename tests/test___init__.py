@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -940,6 +940,59 @@ def test_json_api_get_login_cookie(
         assert connector._page_fetcher.has_bearer_token() is True
         # Second call should return True without re-login
         assert connector.get_login_cookie() is True
+
+
+class RefererRequiringFirmware:
+    """Fake MS3xx firmware: HTTP 400 errCode -2 unless Referer is the switch."""
+
+    def __init__(self, helper: JsonApiTestHelper, host: str) -> None:
+        """Initialize the fake firmware."""
+        self.helper = helper
+        self.referer = f"http://{host}/"
+        self.calls: list[tuple[str, str, dict[str, str]]] = []
+
+    def request(self, method: str, url: str, **kwargs: Any) -> Mock:
+        """Answer like the firmware: reject unless the Referer matches."""
+        headers = kwargs.get("headers") or {}
+        self.calls.append((method, url, headers))
+        if headers.get("Referer") != self.referer:
+            resp = Mock()
+            resp.status_code = requests.codes.bad_request
+            resp.json.return_value = {
+                "errCode": -2,
+                "paraMsgs": [{"object": "unauthorized", "objectValue": "user"}],
+            }
+            return resp
+        return self.helper.mock_json_request(method, url)
+
+
+@pytest.mark.parametrize(
+    ("switch_model", "expected_ports"),
+    JSON_API_MODELS,
+)
+def test_json_api_sends_referer(
+    switch_model: type[AutodetectedSwitchModel],
+    expected_ports: int,
+) -> None:
+    """Test that every JSON REST API call carries the switch's Referer."""
+    host = "192.168.0.1"
+    helper = JsonApiTestHelper(switch_model.MODEL_NAME)
+    firmware = RefererRequiringFirmware(helper, host)
+    connector = NetgearSwitchConnector(host=host, password="password")
+    with patch("py_netgear_plus.fetcher.requests.request") as mock_request:
+        mock_request.side_effect = firmware.request
+        connector.autodetect_model()
+        assert connector.get_login_cookie() is True
+        connector._json_api_fetch(connector.switch_model.PORT_STATUS_TEMPLATES)
+    assert connector.ports == expected_ports
+    methods_and_urls = {(method, url) for method, url, _ in firmware.calls}
+    # autodetect, login, login session and a post-login read were all exercised
+    assert ("patch", f"http://{host}/api/system/login") in methods_and_urls
+    assert ("post", f"http://{host}/api/login_session") in methods_and_urls
+    assert ("get", f"http://{host}/api/ports") in methods_and_urls
+    assert all(
+        headers.get("Referer") == f"http://{host}/" for _, _, headers in firmware.calls
+    )
 
 
 @pytest.mark.parametrize(
