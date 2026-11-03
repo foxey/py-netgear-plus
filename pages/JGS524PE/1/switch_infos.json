@@ -1,7 +1,7 @@
 {
     "switch_ip": "192.168.0.1",
     "switch_name": "switch cellar",
-    "switch_serial_number": "3KL98C5F0002B",
+    "switch_serial_number": "1234567890ABC",
     "switch_bootloader": "unknown",
     "switch_firmware": "2.6.0.50",
     "port_1_status": "on",
