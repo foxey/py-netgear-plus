@@ -1,0 +1,306 @@
+﻿<!DOCTYPE html>
+<html>
+	<head><meta name="format-detection" content="telephone=no,email=no,address=no">
+		<title>Status</title>
+		<meta http-equiv="content-type" content="text/html; charset=utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+		<link type="text/css" href="../css/func_page_layout.css" rel="stylesheet">
+        <style type="text/css">
+        .tableData_ui{ width:100%; overflow:auto;overflow-x:hidden;  font-size:10pt; font-family:Arial;}
+        .tableData_ui table{ width:100%;border:0px red solid;}
+        .tableData_ui table td{height:32px; line-height:20px; color: #666666;}
+		</style>
+
+<script type="text/javascript" language="JavaScript">
+var dhcpOption = parent.System0013+'?'+parent.System0012;
+var dhcpOptionValue = 'Disable?Enable';
+</script>
+
+<script type='text/javascript' language='JavaScript'>
+var helpIcon = '../images/icon_help_contentlevel.png';
+
+var sysGeneInfor = 'JGS524PE?switch cellar?28:80:88:da:65:e6?2.6.0.50?Enable?192.168.1.139?255.255.255.0?192.168.1.1?3KL98C5F0002B';var sysInfo = 'JGS524PE?switch cellar?28-80-88-da-65-e6?2.6.0.50?Enable?192.168.1.139?255.255.255.0?192.168.1.1?3KL98C5F0002B?0?disabled';var secureRand = '8DAF0D42';var innArr = sysGeneInfor.split('?');
+var serialNum = sysInfo.split('?')[8];
+var originalText = 0;
+
+function init()
+{
+     var cheight = 0;
+    cheight += document.getElementById('swInfoBlk').offsetHeight;
+    // Update min-width of HTML
+    document.getElementsByTagName('html')[0].setAttribute('style', 'overflow: auto; overflow-x: hidden; min-height: ' + cheight + 'px;');
+    
+    //var cwidth = 410;
+    // Update min-width of HTML
+    //window.parent.document.getElementsByTagName('html')[0].setAttribute('style', 'overflow: auto; overflow-y: hidden; min-width: ' + (cwidth + 257) + 'px;');
+            
+    if(innArr[4] == 'Enable')
+    {
+        document.getElementById('ipAddr').disabled = true;
+		document.getElementById('subnetMask').disabled = true;
+		document.getElementById('gatewayIp').disabled = true;
+		document.getElementById('iRefresh_DHCP').checked = false;
+		document.getElementById('iRefresh_DHCP').disabled = '';
+    }
+    else
+    {
+        document.getElementById('ipAddr').disabled = false;
+		document.getElementById('subnetMask').disabled = false;
+		document.getElementById('gatewayIp').disabled = false;
+		document.getElementById('iRefresh_DHCP').checked = false;		
+		document.getElementById('iRefresh_DHCP').disabled = 'disabled';
+    }
+}
+
+function submitForm() 
+{
+    if(document.getElementById('swName').value != '')
+    {
+        if(!parent.SWNameValidityCheck(document.getElementById('swName').value))
+        {
+            return;
+        }
+    }
+    if(document.getElementById('ipMode').value == 'Disable')
+    {
+        if(!checkInputFormat(document.getElementById('ipAddr').value, document.getElementById('subnetMask').value, document.getElementById('gatewayIp').value))
+        {
+            return;
+        }
+    }
+
+    // Disable all element
+    document.getElementById('ipMode').disabled = 'disabled';
+    document.getElementById('iRefresh_DHCP').disabled = 'disabled';
+    document.getElementById('ipAddr').disabled = 'disabled';
+    document.getElementById('subnetMask').disabled = 'disabled';
+    document.getElementById('gatewayIp').disabled = 'disabled';
+
+    if (document.getElementById('iRefresh_DHCP').checked == true)
+    {
+        document.getElementById('swInfoBlkBArea').appendChild(parent.createInputEle('', 'dhcp', 'hidden', '', '1', '', ''));
+    }
+    else
+    {
+        if(document.getElementById('ipMode').value == 'Enable')
+        {
+            document.getElementById('swInfoBlkBArea').appendChild(parent.createInputEle('', 'dhcp', 'hidden', '', '2', '', ''));
+        }
+        else
+        {
+            document.getElementById('swInfoBlkBArea').appendChild(parent.createInputEle('', 'dhcp', 'hidden', '', '0', '', ''));
+        }
+            
+        // IP
+        var ip = document.getElementById('ipAddr').value;
+        document.getElementById('swInfoBlkBArea').appendChild(parent.createInputEle('', 'ip', 'hidden', '', ip, '', ''));
+        // Subnet Address
+        var subnet = document.getElementById('subnetMask').value;
+        document.getElementById('swInfoBlkBArea').appendChild(parent.createInputEle('', 'subnet', 'hidden', '', subnet, '', ''));
+        // Gateway Address
+        var gateway =  document.getElementById('gatewayIp').value;
+        document.getElementById('swInfoBlkBArea').appendChild(parent.createInputEle('', 'gateway', 'hidden', '', gateway, '', ''));
+    }
+    
+    document.getElementById('formArea').submit();
+}
+
+function checkDHCPStatus(status)
+{
+    document.getElementById('btnApply').className = 'btnStyle';
+    document.getElementById('btnApply').setAttribute('href', 'javascript:submitForm()');
+
+    if(status == 'Enable')
+    {
+        document.getElementById('ipAddr').disabled = true;
+		document.getElementById('subnetMask').disabled = true;
+		document.getElementById('gatewayIp').disabled = true;
+		document.getElementById('iRefresh_DHCP').checked = true;
+		document.getElementById('iRefresh_DHCP').disabled = 'disabled';
+    }
+    else
+    {
+        document.getElementById('ipAddr').disabled = false;
+		document.getElementById('subnetMask').disabled = false;
+		document.getElementById('gatewayIp').disabled = false;
+		document.getElementById('iRefresh_DHCP').checked = false;		
+		document.getElementById('iRefresh_DHCP').disabled = 'disabled';
+    }
+    
+    //
+    parent.showDialogWithAlert(parent.System0011, parent.Message0015);
+}
+
+function checkInputFormat(ipAddr, subnetMask, gateway)
+{
+    var result;
+    
+    // IP Address
+    result = parent.ipValidityCheck(ipAddr);
+    if(!result)
+        return result;
+    
+    // Gateway Address
+   /* result = parent.gatewayValidityCheck(gateway);
+    if(!result)
+        return result;*/
+       
+    // Subnet Mask
+    result = parent.subnetMaskCheck(subnetMask, ipAddr);
+    if(!result)
+        return result;  
+    
+    result = parent.checkInTheSameSubnet(ipAddr, gateway, subnetMask);
+    
+    return result;
+}
+
+function checkRefresh()
+{
+    document.getElementById('btnApply').className = 'btnStyle';
+    document.getElementById('btnApply').setAttribute('href', 'javascript:submitForm()');
+    
+    //
+    if(document.getElementById('iRefresh_DHCP').checked == true)
+        parent.showDialogWithAlert(parent.System0011, parent.Message0015);
+}
+function enableControl()
+{
+    // Enable button on control bar
+    document.getElementById('btnApply').className = 'btnStyle';
+    document.getElementById('btnApply').setAttribute('href', 'javascript:submitForm()');
+
+    // Enable button on control bar
+    document.getElementById('btnCancel').className = 'btnStyle';
+    document.getElementById('btnCancel').setAttribute('href', 'javascript:refreshPage()');
+
+}
+
+function refreshPage() 
+{
+    window.location.reload();
+}
+
+</script>
+
+</head>
+
+<body onload="init();">
+	<div id="mainContenter" class="mainContenter">
+        <script type="text/javascript" language='JavaScript'>
+            var data = new Array(), colWidth;
+
+            // Create Submit form
+            mainContenter.appendChild(parent.createSubmitForm('sysIp', 'status_switch_info.htm', secureRand));
+            
+            // Create Control Bar
+            contentArea.appendChild(parent.createUnClickCtrlBar(parent.RadioButton0002+'?'+parent.RadioButton0001, 'Apply?Cancel'));
+            
+            // Create Selected Switch Block
+            // Create Main Area
+            contentArea.appendChild(parent.createBlkArea('swInfoBlk', parent.System0007, 'blkArea_ui'));
+            
+            // Insert help dialog
+			document.getElementById('swInfoBlkHIcon').src = helpIcon;
+			document.getElementById('swInfoBlkHIcon').setAttribute('style', 'width:11px; height:11px;');
+			
+            //var arg = 'parent.showHelpDialog(parent.swinfo_help.t1, parent.swinfo_help.t2, parent.swinfo_help.desc, parent.swinfo_help.item)';
+            var arg = 'window.open("help.htm?from=swinfo", "_blank", "width=400, height=400")';
+            document.getElementById('swInfoBlkHIcon').setAttribute('onclick', arg);
+
+            // Insert Data
+            // 1. Insert switch information data table into body area
+            document.getElementById('swInfoBlkBArea').appendChild(parent.createTableEle('selSwTData', 'tableData_ui'));
+            colWidth = 'auto?60px?98px?auto';
+
+            // 1.1 Product Name
+            data[0] = parent.createDivEle('swInfoDiv1', parent.System0008, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv1', '', 'colInterval textLeft');
+            data[2] = parent.createDivEle('swInfoDiv2', innArr[0], 'textLeft itemNameLeftMargin');
+            data[3] = parent.createDivEle('emptyDiv2', '', '');
+            parent.createOneRowEle(0, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+
+            // 1.2 Switch Name
+            data = [];
+            data[0] = parent.createDivEle('swInfoDiv3', parent.System0094, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv3', '', 'colInterval');
+            data[2] = parent.createInputEle('swName', 'swName', 'text', '', parent.htmlSymbolDecode(innArr[1].replace(/(@#q)/ig,'?')), '', 'textInputStyle swLength');
+            data[3] = parent.createDivEle('emptyDiv4', '', '');
+            parent.createOneRowEle(1, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+            document.getElementById('swName').setAttribute('onkeydown', 'return parent.keyValidate(this.id, event, "down", enableControl, false, false)');
+            document.getElementById('swName').setAttribute('onkeyup', 'return parent.keyValidate(this.id, event, "up", enableControl, false, false)');
+            document.getElementById('swName').setAttribute('maxlength', '20');
+
+            // Serial Number
+            data = [];
+            data[0] = parent.createDivEle('swInfoDiv12', parent.System0091, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv16', '', 'colInterval');
+            data[2] = parent.createDivEle('swInfoDiv13', serialNum, 'textLeft itemNameLeftMargin');
+            data[3] = parent.createDivEle('emptyDiv17', '', '');
+            parent.createOneRowEle(2, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+
+
+            // 1.3 MAC Address
+            data = [];
+            data[0] = parent.createDivEle('swInfoDiv4', parent.System0009, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv5', '', 'colInterval');
+            data[2] = parent.createDivEle('swInfoDiv5', innArr[2], 'textLeft itemNameLeftMargin');
+            data[3] = parent.createDivEle('emptyDiv6', '', '');
+            parent.createOneRowEle(3, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+
+            // 1.4 Firmware Version
+            data = [];
+            data[0] = parent.createDivEle('swInfoDiv6', parent.System0010, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv7', '', 'colInterval');
+            data[2] = parent.createDivEle('swInfoDiv7', innArr[3], 'textLeft itemNameLeftMargin');
+            data[3] = parent.createDivEle('emptyDiv8', '', '');
+            parent.createOneRowEle(4, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+
+            // 1.5 DHCP Mode
+            data = [];
+            data[0] = parent.createDivEle('swInfoDiv8', parent.System0011, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv9', '', 'colInterval');
+            data[2] = parent.createSelectEle('ipMode', dhcpOption, dhcpOptionValue, innArr[4], 'checkDHCPStatus(this.value,0)', 'comboInputStyle');
+            data[3] = parent.createCheckWithText('iRefresh_DHCP', parent.RadioButton0003, '');
+            parent.createOneRowEle(5, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+            document.getElementById('iRefresh_DHCP').setAttribute('onclick', 'checkRefresh()');
+
+            // 1.6 IP Address
+            data = [];
+            data[0] = parent.createDivEle('swInfoDiv9', parent.System0014, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv10', '', 'colInterval');
+            data[2] = parent.createInputEle('ipAddr', 'ipAddr', 'text', '', innArr[5], '', 'textInputStyle swLength');
+            data[3] = parent.createDivEle('emptyDiv11', '', '');
+            parent.createOneRowEle(6, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+			document.getElementById('ipAddr').setAttribute('enable', '');
+			document.getElementById('ipAddr').setAttribute('MAXLENGTH', '15');		
+			document.getElementById('ipAddr').setAttribute('onkeydown', 'return parent.keyValidate(this.id, event, "down", enableControl, false, false)');
+            document.getElementById('ipAddr').setAttribute('onkeyup', 'return parent.keyValidate(this.id, event, "up", enableControl, false, false)');
+			
+            // 1.7 Subnet Mask
+            data = [];
+            data[0] = parent.createDivEle('swInfoDiv10', parent.System0015, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv12', '', 'colInterval');
+            data[2] = parent.createInputEle('subnetMask', 'subnetMask', 'text', '', innArr[6], '', 'textInputStyle swLength');
+            data[3] = parent.createDivEle('emptyDiv13', '', '');
+            parent.createOneRowEle(7, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+			document.getElementById('subnetMask').setAttribute('enable', '');			
+			document.getElementById('subnetMask').setAttribute('MAXLENGTH', '15');				
+			document.getElementById('subnetMask').setAttribute('onkeydown', 'return parent.keyValidate(this.id, event, "down", enableControl, false, false)');
+            document.getElementById('subnetMask').setAttribute('onkeyup', 'return parent.keyValidate(this.id, event, "up", enableControl, false, false)');		
+
+            // 1.8 Gateway Address
+            data = [];
+            data[0] = parent.createDivEle('swInfoDiv11', parent.System0016, 'textLeft itemNameLeftMargin');
+            data[1] = parent.createDivEle('emptyDiv14', '', 'colInterval');
+            data[2] = parent.createInputEle('gatewayIp', 'gatewayIp', 'text', '', innArr[7], '', 'textInputStyle swLength');
+            data[3] = parent.createDivEle('emptyDiv15', '', '');
+            parent.createOneRowEle(8, document.getElementById('selSwTData'), data, colWidth, 'borderNone');
+			document.getElementById('gatewayIp').setAttribute('enable', '');						
+			document.getElementById('gatewayIp').setAttribute('MAXLENGTH', '15');
+			document.getElementById('gatewayIp').setAttribute('onkeydown', 'return parent.keyValidate(this.id, event, "down", enableControl, false, false)');
+            document.getElementById('gatewayIp').setAttribute('onkeyup', 'return parent.keyValidate(this.id, event, "up", enableControl, false, false)');
+        </script>
+    </div>
+</body>
+</html>
