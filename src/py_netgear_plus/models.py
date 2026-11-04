@@ -558,6 +558,47 @@ class XS512EM(EMxSeries):
     ]
 
 
+class XS716E(AutodetectedSwitchModel):
+    """Netgear XS716E (16x 10G + 1 combo SFP+, no PoE, both hw revisions)."""
+
+    # Web UI (firmware V1.6.0.x) identifies both v1 and v2 as "XS716E".
+    # Login posts to login.cgi with hex_hmac_md5 (no rand) plus a csrftoken.
+
+    MODEL_NAME = "XS716E"
+    PORTS = 16
+    POE_PORTS: ClassVar = []
+    # session cookie is named after the model, e.g. "XS716E=000031FF..."
+    ALLOWED_COOKIE_TYPES: ClassVar = ["XS716E"]
+
+    CRYPT_FUNCTION: ClassVar = "hex_hmac_md5"
+    CHECKS_AND_RESULTS: ClassVar = [
+        ("check_login_form_rand", [False]),
+        ("parse_login_title_tag", ["XS716E"]),
+    ]
+
+    LOGIN_TEMPLATE: ClassVar = {
+        "method": "post",
+        "url": "http://{ip}/login.cgi",
+        "params": {
+            "csrftoken": "_login_csrf_token",
+            "password": "_password_hash",
+        },
+    }
+
+    SWITCH_INFO_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/system.htm"},
+    ]
+    PORT_STATUS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/portconf.htm"},
+    ]
+    PORT_STATISTICS_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/statist.htm"},
+    ]
+    LOGOUT_TEMPLATES: ClassVar = [
+        {"method": "get", "url": "http://{ip}/logout.cgi"},
+    ]
+
+
 class GS30xSeries(AutodetectedSwitchModel):
     """Parent class definition for Netgear GS30x series."""
 

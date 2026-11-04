@@ -192,6 +192,20 @@ class PageParser:
         """Return true of rand value from login page is present."""
         return bool(self.parse_login_form_rand(page))
 
+    def parse_login_csrf_token(
+        self, page: Response | BaseResponse | None
+    ) -> str | None:
+        """Return csrftoken hidden field value from login page if present."""
+        if page is not None and page.content:
+            tree = html.fromstring(page.content)
+            csrf_elems = tree.xpath('//input[@name="csrftoken"]')
+            if csrf_elems and csrf_elems[0].value:
+                return csrf_elems[0].value
+        _LOGGER.debug(
+            "[PageParser.parse_login_csrf_token] csrftoken INPUT element not found."
+        )
+        return None
+
     def parse_login_title_tag(self, page: Response | BaseResponse) -> str | None:
         """Return the title tag from the login page."""
         """For new firmwares V2.06.10, V2.06.17, V2.06.24."""
@@ -878,6 +892,113 @@ class XS512EM(EMxSeries):
     def __init__(self) -> None:
         """Initialize the GS110EMX parser."""
         super().__init__()
+
+
+class XS716E(PageParser):
+    """Parser for the XS716E switch (system.htm / portconf.htm / statist.htm)."""
+
+    def __init__(self) -> None:
+        """Initialize the XS716E parser."""
+        super().__init__()
+
+    def parse_switch_metadata(self, page: Response | BaseResponse) -> dict[str, Any]:
+        """Parse switch info from system.htm."""
+        tree = html.fromstring(page.content)
+
+        def value_for(label_id: str) -> str:
+            return get_first_text(
+                tree,
+                f'//span[@id="{label_id}"]/parent::td/following-sibling::td[1]',
+            )
+
+        self._switch_bootloader = "unknown"
+        self._switch_firmware = value_for("system_fw_version")
+
+        return {
+            "switch_name": get_first_value(tree, '//input[@id="switch_name"]'),
+            "switch_serial_number": value_for("system_serial_number"),
+            "switch_bootloader": self._switch_bootloader,
+            "switch_firmware": self._switch_firmware,
+        }
+
+    def parse_client_hash(self, page: Response | BaseResponse) -> str | None:
+        """No per-request client hash on this model."""
+        del page
+        return None
+
+    def parse_port_status(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[int, dict[str, Any]]:
+        """Parse port status from portconf.htm (table#tbl2, tr.portID rows)."""
+        # Columns: [checkbox, port#, status, auto-neg, link speed, flow control,
+        # max MTU]; port# / status / link speed also carry a hidden <input value>.
+        tree = html.fromstring(page.content)
+        rows = tree.xpath('//tr[@class="portID"]')
+        if len(rows) != ports:
+            message = f"Port count mismatch: {len(rows)} != {ports}"
+            raise NetgearPlusPageParserError(message)
+
+        def first(values: list[str]) -> str:
+            return values[0].strip() if values else ""
+
+        status_by_port = {}
+        for row in rows:
+            tds = row.xpath("./td")
+            try:
+                port_nr = int(first(tds[1].xpath(".//input/@value")))
+            except (IndexError, ValueError) as error:
+                message = "parse_port_status: port number not found."
+                raise NetgearPlusPageParserError(message) from error
+            status_by_port[port_nr] = {
+                "status": first(tds[2].xpath(".//input/@value")),
+                "modus_speed": first(tds[3].xpath(".//span/text()")),
+                "connection_speed": strip_duplex(
+                    first(tds[4].xpath(".//input/@value"))
+                ),
+                "flow_control": first(tds[5].xpath(".//span/text()")),
+            }
+        self._port_status = status_by_port
+        _LOGGER.debug("Port Status is %s", status_by_port)
+        return status_by_port
+
+    def parse_port_statistics(
+        self, page: Response | BaseResponse, ports: int
+    ) -> dict[str, Any]:
+        """Parse port statistics from statist.htm (table#tbl2, tr.portID rows)."""
+        # Columns: [port#, bytes received, bytes sent, CRC errors].
+        # Byte counters are 32-bit and wrap around.
+        tree = html.fromstring(page.content)
+        rows = tree.xpath('//tr[@class="portID"]')
+        rx = [0] * ports
+        tx = [0] * ports
+        crc = [0] * ports
+
+        def cell_int(cell: html.HtmlElement) -> int:
+            try:
+                return int(cell.text.strip())
+            except (AttributeError, ValueError):
+                return 0
+
+        for row in rows:
+            tds = row.xpath("./td")
+            try:
+                port_index = int(tds[0].text.strip()) - 1
+            except (IndexError, AttributeError, ValueError):
+                continue
+            if not 0 <= port_index < ports:
+                continue
+            rx[port_index] = cell_int(tds[1])
+            tx[port_index] = cell_int(tds[2])
+            crc[port_index] = cell_int(tds[3])
+
+        return {
+            "traffic_rx": rx,
+            "traffic_tx": tx,
+            "sum_rx": rx,
+            "sum_tx": tx,
+            "crc_errors": crc,
+            "speed_io": [0] * ports,
+        }
 
 
 class GS30xSeries(PageParser):
