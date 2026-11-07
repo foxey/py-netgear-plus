@@ -451,6 +451,9 @@ class NetgearSwitchConnector:
             if self._page_fetcher.has_bearer_token():
                 return True
             return self._json_api_login()
+        if self._password is None:
+            message = "Session expired and no password available to login again."
+            raise LoginFailedError(message)
         if not self._page_fetcher.get_login_page_response():
             self._page_fetcher.check_login_url(self.switch_model)
         rand = self._page_parser.parse_login_form_rand(
