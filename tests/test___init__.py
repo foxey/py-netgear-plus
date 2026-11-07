@@ -407,6 +407,8 @@ def test_get_login_cookie(
         ("GS308EPP/0/portStatistics.cgi", True),
         ("GS316EPP/unauthenticated.html", False),
         ("GS316EPP/0/dashboard.html", True),
+        ("JGS524PE/unauthenticated.html", False),
+        ("JGS524PE/0/status_switch_info.htm", True),
     ],
 )
 def test_is_authenticated(page: str, expected: bool) -> None:  # noqa: FBT001

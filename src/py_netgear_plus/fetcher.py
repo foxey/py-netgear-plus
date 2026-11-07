@@ -437,7 +437,8 @@ class PageFetcher:
     def _is_authenticated(self, response: Response | BaseResponse) -> bool:
         """Check for redirect to login when not authenticated (anymore)."""
         if "content" in dir(response) and response.content:
-            title = html.fromstring(response.content).xpath("//title")
+            tree = html.fromstring(response.content)
+            title = tree.xpath("//title")
             if (
                 len(title)
                 and title[0].text
@@ -448,19 +449,18 @@ class PageFetcher:
                     title[0].text.lower(),
                 )
                 return False
-            script = html.fromstring(response.content).xpath(
-                '//script[contains(text(),"/wmi/login")]'
-            )
-            if (
-                len(script) > 0
-                and script[0].text
-                and 'top.location.href = "/wmi/login"' in script[0].text
-            ):
-                _LOGGER.info(
-                    "[PageFetcher._is_authenticated] Returning false: script=%s",
-                    script[0].text,
-                )
-                return False
+            for script in tree.xpath("//script"):
+                text = script.text or ""
+                # Login redirect scripts: GS31x use /wmi/login,
+                # GS108Ev3 and JGS524PE use /login.htm
+                if 'top.location.href = "/wmi/login"' in text or (
+                    "location.href" in text and "/login.htm" in text
+                ):
+                    _LOGGER.info(
+                        "[PageFetcher._is_authenticated] Returning false: script=%s",
+                        text,
+                    )
+                    return False
         return True
 
     def request(  # noqa: PLR0913
