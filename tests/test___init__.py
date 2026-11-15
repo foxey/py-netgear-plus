@@ -143,6 +143,14 @@ PORT_SWITCH_MODELS = [
 ]
 
 
+def _add_template_params(
+    connector: NetgearSwitchConnector, template: dict, data: dict
+) -> None:
+    """Add the template's session params (hash/Gambit) to expected form data."""
+    for key, attr in template.get("params", {}).items():
+        data[key] = getattr(connector, attr)
+
+
 class PyTestPageFetcher:
     """A class to fetch pages from a file."""
 
@@ -525,11 +533,15 @@ def test_turn_on_and_off_port(switch_model: type[AutodetectedSwitchModel]) -> No
                 mock_request.assert_called()
                 # data will be updated by set_data_from_template inside switch_port
                 # but we can check if it was called with correct url and method
+                model = connector.switch_model
                 expected_data = data.copy()
-                expected_data["DESCRIPTION"] = "Test"
-                expected_data["FLOW_CONTROL"] = 1
-                if connector._client_hash:
-                    expected_data["hash"] = connector._client_hash
+                expected_data[model.SWITCH_PORT_DESCRIPTION_FIELD] = "Test"
+                expected_data[model.SWITCH_PORT_FLOW_CONTROL_FIELD] = (
+                    model.SWITCH_PORT_FLOW_CONTROL_VALUES[True]
+                )
+                _add_template_params(
+                    connector, model.SWITCH_PORT_TEMPLATES[0], expected_data
+                )
                 mock_request.assert_called_with(
                     connector.switch_model.SWITCH_PORT_TEMPLATES[0]["method"],
                     connector.switch_model.SWITCH_PORT_TEMPLATES[0]["url"].format(
@@ -554,6 +566,7 @@ def test_switch_port_uses_model_defaults_when_optional_fields_missing(
     connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
     connector._set_instance_attributes_by_model(switch_model())
     connector._client_hash = "client_hash"
+    connector._gambit = "gambit"
     connector.set_cookie("cookie_name", "cookie_value")
 
     response = Mock()
@@ -579,7 +592,9 @@ def test_switch_port_uses_model_defaults_when_optional_fields_missing(
             assert connector.switch_port(port, "off") is True
 
         expected_data = connector.switch_model.get_switch_port_data(port, "off").copy()
-        expected_data["hash"] = connector._client_hash
+        _add_template_params(
+            connector, connector.switch_model.SWITCH_PORT_TEMPLATES[0], expected_data
+        )
         mock_request.assert_called_with(
             connector.switch_model.SWITCH_PORT_TEMPLATES[0]["method"],
             connector.switch_model.SWITCH_PORT_TEMPLATES[0]["url"].format(
@@ -609,6 +624,7 @@ def test_switch_port_autodetects_before_validating_port_range(
 
     with patch.object(connector, "autodetect_model", side_effect=_autodetect):
         connector._client_hash = "client_hash"
+        connector._gambit = "gambit"
         connector.set_cookie("cookie_name", "cookie_value")
 
         response = Mock()
@@ -638,6 +654,7 @@ def test_switch_port_accepts_pending_apply_page(
     connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
     connector._set_instance_attributes_by_model(switch_model())
     connector._client_hash = "client_hash"
+    connector._gambit = "gambit"
     connector.set_cookie("cookie_name", "cookie_value")
 
     response = Mock()
@@ -663,7 +680,9 @@ def test_switch_port_accepts_pending_apply_page(
     ):
         assert connector.turn_off_port(1) is True
         mock_sleep.assert_called_with(4.0)
-        assert connector._client_hash == "4554"
+        assert connector._client_hash == connector._page_parser.parse_client_hash(
+            response
+        )
 
 
 @pytest.mark.parametrize(

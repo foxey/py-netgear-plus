@@ -1745,11 +1745,15 @@ class NetgearSwitchConnector:
             method = template["method"]
             data = self.switch_model.get_switch_port_data(port, state)
             if desc_key in current_info:
-                data["DESCRIPTION"] = current_info[desc_key]
+                data[self.switch_model.SWITCH_PORT_DESCRIPTION_FIELD] = current_info[
+                    desc_key
+                ]
             if flow_key in current_info:
                 flow = _normalize_flow_control(current_info[flow_key])
                 if flow is not None:
-                    data["FLOW_CONTROL"] = flow
+                    data[self.switch_model.SWITCH_PORT_FLOW_CONTROL_FIELD] = (
+                        self.switch_model.SWITCH_PORT_FLOW_CONTROL_VALUES[flow == 1]
+                    )
             self._page_fetcher.set_data_from_template(template, self, data)
             _LOGGER.debug("switch_port data=%s", data)
             response = self._request_switch_port_change(method, url, data)
