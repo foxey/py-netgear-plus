@@ -118,6 +118,9 @@ class AutodetectedSwitchModel:
         }
     ]
     SWITCH_PORT_TEMPLATES: ClassVar = []
+    SWITCH_PORT_DESCRIPTION_FIELD: ClassVar = "DESCRIPTION"
+    SWITCH_PORT_FLOW_CONTROL_FIELD: ClassVar = "FLOW_CONTROL"
+    SWITCH_PORT_FLOW_CONTROL_VALUES: ClassVar = {True: 1, False: 2}
     POE_PORT_CONFIG_TEMPLATES: ClassVar = []
     SWITCH_POE_PORT_TEMPLATES: ClassVar = []
     CYCLE_POE_PORT_TEMPLATES: ClassVar = []
@@ -545,6 +548,33 @@ class GS110EMX(EMxSeries):
         ("check_login_form_rand", [True]),
         ("parse_login_title_tag", ["GS110EMX"]),
     ]
+    SWITCH_PORT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/iss/specific/port_settings.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
+    SWITCH_PORT_DESCRIPTION_FIELD: ClassVar = "PORT_DESCRIPTION"
+    SWITCH_PORT_FLOW_CONTROL_FIELD: ClassVar = "FLOW_CONTROL_MODE"
+    SWITCH_PORT_FLOW_CONTROL_VALUES: ClassVar = {True: 4, False: 1}
+
+    def get_switch_port_data(self, port: int, state: str) -> dict:
+        """
+        Build form data for enabling/disabling a port.
+
+        Mirrors sendPortStatusForm() in the switch's function.js:
+        PORT_CTRL_MODE/DUPLEX/SPEED is 1/0/0 for Auto and 3/0/0 for Disable.
+        switch_port() fills in the current description and flow control.
+        """
+        return {
+            "PORT_NO": f"{port};",
+            "PORT_DESCRIPTION": "",
+            "PORT_CTRL_MODE": 1 if state == "on" else 3,
+            "PORT_CTRL_DUPLEX": 0,
+            "PORT_CTRL_SPEED": 0,
+            "ACTION": "apply",
+        }
 
 
 class XS512EM(EMxSeries):

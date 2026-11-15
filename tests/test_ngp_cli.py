@@ -7,9 +7,11 @@ import pytest
 from py_netgear_plus import InvalidPoEPortError
 from py_netgear_plus.ngp_cli import (
     _poe_status,
+    _port_list,
     _print_table,
     parse_commandline,
     poe_command,
+    port_command,
 )
 
 
@@ -130,3 +132,46 @@ def test_parse_commandline_poe_args_match_dispatcher(
     namespace = parse_commandline().parse_args(argv)
     for key, value in expected.items():
         assert getattr(namespace, key) == value
+
+
+@pytest.mark.parametrize("state", ["on", "off"])
+def test_port_command_on_off_calls_switch_port(state: str) -> None:
+    """Port on/off call switch_port and skip the port-naming capability check."""
+    connector = Mock()
+    connector.switch_model.has_port_naming.return_value = False
+    connector.switch_port.return_value = True
+    args = argparse.Namespace(port_action=state, port=2)
+    with patch("py_netgear_plus.ngp_cli.load_cookie", return_value=True):
+        assert port_command(connector, args) is True
+    connector.switch_port.assert_called_once_with(2, state)
+
+
+def test_port_command_on_unsupported_model_reports_error() -> None:
+    """A model without port switching templates is reported, not raised."""
+    connector = Mock()
+    connector.switch_port.side_effect = NotImplementedError("no templates")
+    args = argparse.Namespace(port_action="off", port=1)
+    with patch("py_netgear_plus.ngp_cli.load_cookie", return_value=True):
+        assert port_command(connector, args) is False
+
+
+def test_parse_commandline_port_on_off() -> None:
+    """The port subparser accepts on/off with a port number."""
+    namespace = parse_commandline().parse_args(["port", "off", "4"])
+    assert namespace.command == "port"
+    assert namespace.port_action == "off"
+    assert namespace.port == 4
+
+
+def test_port_list_uses_description_as_name(capsys: pytest.CaptureFixture) -> None:
+    """Port list shows the description when the model has no 'name' setting."""
+    connector = Mock()
+    connector.get_port_infos.return_value = {
+        1: {"status": "on", "description": "Living Room"},
+        2: {"status": "off"},
+    }
+    args = argparse.Namespace(json=False)
+    assert _port_list(connector, args) is True
+    lines = capsys.readouterr().out.splitlines()
+    assert "Living Room" in lines[1]
+    assert "-" in lines[2]

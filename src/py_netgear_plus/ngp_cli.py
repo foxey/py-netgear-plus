@@ -21,6 +21,11 @@ Commands:
     vlan              Manage VLAN configuration (sub: status/mode/add/edit/
                         remove/pvid/apply).
     led               Control front panel LEDs (sub: on/off/status).
+    port list         Show per-port settings.
+    port on <port>    Enable a port (Auto).
+    port off <port>   Disable a port.
+    port rename <port> <name>
+                      Rename a port.
     poe status        Show PoE config and live status per port.
     poe on <port>     Enable PoE on a port.
     poe off <port>    Disable PoE on a port.
@@ -54,6 +59,7 @@ from py_netgear_plus import (
     InvalidPoEPortError,
     LoginFailedError,
     NetgearSwitchConnector,
+    PortNumberOutofRangeError,
     SwitchModelNotDetectedError,
 )
 from py_netgear_plus import (
@@ -281,6 +287,9 @@ def _add_port_subparser(subparsers: argparse._SubParsersAction) -> None:
     port_parser = subparsers.add_parser("port", help="Port management")
     port_sub = port_parser.add_subparsers(dest="port_action")
     port_sub.add_parser("list", help="Show per-port settings")
+    for verb, text in (("on", "Enable a port (Auto)"), ("off", "Disable a port")):
+        sp = port_sub.add_parser(verb, help=text)
+        sp.add_argument("port", type=int, help="Port number (1-based)")
     port_rename = port_sub.add_parser("rename", help="Rename a port")
     port_rename.add_argument("port", type=int)
     port_rename.add_argument("name")
@@ -535,12 +544,32 @@ def _port_list(connector: NetgearSwitchConnector, args: argparse.Namespace) -> b
         ("egress", "egress_rate"),
         ("flow_ctrl", "flow_control"),
     ]
+    for info in ports.values():
+        # Models without a port settings page report the name as description.
+        if "name" not in info and info.get("description"):
+            info["name"] = info["description"]
     rows = [
         [nr, *[info.get(key, "-") for _, key in columns[1:]]]
         for nr, info in ports.items()
     ]
     _print_table([name for name, _ in columns], rows)
     return True
+
+
+def _port_switch(connector: NetgearSwitchConnector, port: int, state: str) -> bool:
+    """Enable or disable a port, reporting unsupported models and bad ports."""
+    model = connector.switch_model.MODEL_NAME
+    try:
+        ok = connector.switch_port(port, state)
+    except NotImplementedError:
+        print(f"Port on/off not supported on {model}.", file=stderr)  # noqa: T201
+        return False
+    except PortNumberOutofRangeError as exc:
+        print(str(exc), file=stderr)  # noqa: T201
+        return False
+    if not ok:
+        print(f"port {state} {port} failed.", file=stderr)  # noqa: T201
+    return ok
 
 
 def _poe_status(connector: NetgearSwitchConnector, args: argparse.Namespace) -> bool:
@@ -737,6 +766,8 @@ def port_command(  # noqa: PLR0911
     connector._get_switch_metadata()  # noqa: SLF001
     if args.port_action == "list":
         return _port_list(connector, args)
+    if args.port_action in ("on", "off"):
+        return _port_switch(connector, args.port, args.port_action)
     if not connector.switch_model.has_port_naming():
         print(  # noqa: T201
             f"Port naming not supported on {connector.switch_model.MODEL_NAME}.",

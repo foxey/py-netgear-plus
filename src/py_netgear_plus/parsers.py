@@ -811,14 +811,18 @@ class EMxSeries(PageParser):
                 raise NetgearPlusPageParserError(message) from error
 
             xtree_port_attributes = element.xpath("./td")
+            description_text = (xtree_port_attributes[2].text or "").strip() or None
             port_state_text = xtree_port_attributes[3].text.strip()
             modus_speed_text = xtree_port_attributes[4].text.strip()
             connection_speed_text = strip_duplex(xtree_port_attributes[5].text)
+            flow_control_text = (xtree_port_attributes[6].text or "").strip() or None
 
             status_by_port[port_nr] = {
+                "description": description_text,
                 "status": port_state_text,
                 "modus_speed": modus_speed_text,
                 "connection_speed": connection_speed_text,
+                "flow_control": flow_control_text,
             }
 
         self.port_status = status_by_port
