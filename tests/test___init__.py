@@ -141,6 +141,26 @@ TEST_MODELS = [model[0] for model in MODEL_PARAMETERS]
 PORT_SWITCH_MODELS = [
     switch_model for switch_model in TEST_MODELS if switch_model.SWITCH_PORT_TEMPLATES
 ]
+# The "Please wait..." pending-apply page carries a new form hash, so it only
+# applies to models that authenticate port switching with a hash (not Gambit).
+PORT_SWITCH_HASH_MODELS = [
+    switch_model
+    for switch_model in PORT_SWITCH_MODELS
+    if "hash" in switch_model.SWITCH_PORT_TEMPLATES[0].get("params", {})
+]
+
+
+def _expected_template_params(
+    template: dict, connector: NetgearSwitchConnector
+) -> dict:
+    """Return the auth/template params (hash, Gambit, literals) a request adds."""
+    params = {}
+    for key, value in template.get("params", {}).items():
+        if value.startswith("literal:"):
+            params[key] = value[8:]
+        else:
+            params[key] = getattr(connector, value)
+    return params
 
 
 class PyTestPageFetcher:
@@ -528,8 +548,11 @@ def test_turn_on_and_off_port(switch_model: type[AutodetectedSwitchModel]) -> No
                 expected_data = data.copy()
                 expected_data["DESCRIPTION"] = "Test"
                 expected_data["FLOW_CONTROL"] = 1
-                if connector._client_hash:
-                    expected_data["hash"] = connector._client_hash
+                expected_data.update(
+                    _expected_template_params(
+                        connector.switch_model.SWITCH_PORT_TEMPLATES[0], connector
+                    )
+                )
                 mock_request.assert_called_with(
                     connector.switch_model.SWITCH_PORT_TEMPLATES[0]["method"],
                     connector.switch_model.SWITCH_PORT_TEMPLATES[0]["url"].format(
@@ -554,6 +577,7 @@ def test_switch_port_uses_model_defaults_when_optional_fields_missing(
     connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
     connector._set_instance_attributes_by_model(switch_model())
     connector._client_hash = "client_hash"
+    connector._gambit = "gambit"
     connector.set_cookie("cookie_name", "cookie_value")
 
     response = Mock()
@@ -579,7 +603,11 @@ def test_switch_port_uses_model_defaults_when_optional_fields_missing(
             assert connector.switch_port(port, "off") is True
 
         expected_data = connector.switch_model.get_switch_port_data(port, "off").copy()
-        expected_data["hash"] = connector._client_hash
+        expected_data.update(
+            _expected_template_params(
+                connector.switch_model.SWITCH_PORT_TEMPLATES[0], connector
+            )
+        )
         mock_request.assert_called_with(
             connector.switch_model.SWITCH_PORT_TEMPLATES[0]["method"],
             connector.switch_model.SWITCH_PORT_TEMPLATES[0]["url"].format(
@@ -609,6 +637,7 @@ def test_switch_port_autodetects_before_validating_port_range(
 
     with patch.object(connector, "autodetect_model", side_effect=_autodetect):
         connector._client_hash = "client_hash"
+        connector._gambit = "gambit"
         connector.set_cookie("cookie_name", "cookie_value")
 
         response = Mock()
@@ -629,7 +658,7 @@ def test_switch_port_autodetects_before_validating_port_range(
 
 @pytest.mark.parametrize(
     "switch_model",
-    PORT_SWITCH_MODELS,
+    PORT_SWITCH_HASH_MODELS,
 )
 def test_switch_port_accepts_pending_apply_page(
     switch_model: type[AutodetectedSwitchModel],
@@ -1614,3 +1643,44 @@ def test_get_port_infos_gs308ep() -> None:
 
 if __name__ == "__main__":
     pytest.main()
+
+
+def test_gs316_switch_port_payload() -> None:
+    """Test the GS316 series port enable/disable form (PORT_CTRL_MODE 1/3)."""
+    connector = NetgearSwitchConnector(host="192.168.0.1", password="password")
+    connector._set_instance_attributes_by_model(GS316EPP())
+    connector._gambit = "gambit"
+    connector.set_cookie("gambitCookie", "gambit")
+
+    response = Mock()
+    response.status_code = requests.codes.ok
+    response.content = b"SUCCESS"
+    with (
+        patch(
+            "py_netgear_plus.fetcher.requests.request",
+            return_value=response,
+        ) as mock_request,
+        patch(
+            "py_netgear_plus.NetgearSwitchConnector.get_switch_infos",
+            return_value={},
+        ),
+    ):
+        for state, mode in (("off", 3), ("on", 1)):
+            assert connector.switch_port(6, state) is True
+            args, kwargs = mock_request.call_args
+            assert args == ("post", "http://192.168.0.1/iss/specific/dashboard.html")
+            assert kwargs["data"] == {
+                "TYPE": "portInfo",
+                "PORT_NO": 6,
+                "PORT_NAME": "",
+                "INGRESS": "NOTSET",
+                "EGRESS": "NOTSET",
+                "FLOW_CONTROL": "NOTSET",
+                "PORT_CTRL_MODE": mode,
+                "COLOR1G": "NOTSET",
+                "COLOR100M": "NOTSET",
+                "FREQUENCY": -1,
+                "BRIGHTNESS": "undefined",
+                "STATUS": 0,
+                "Gambit": "gambit",
+            }
