@@ -936,6 +936,13 @@ class GS316Series(GS30xSeries):
             "params": {"Gambit": "_gambit"},
         }
     ]
+    SWITCH_PORT_TEMPLATES: ClassVar = [
+        {
+            "method": "post",
+            "url": "http://{ip}/iss/specific/dashboard.html",
+            "params": {"Gambit": "_gambit"},
+        }
+    ]
     SWITCH_REBOOT_TEMPLATES: ClassVar = [
         {
             "method": "post",
@@ -958,6 +965,23 @@ class GS316Series(GS30xSeries):
     IP_CONFIG_SET_TEMPLATES: ClassVar = []
     PASSWORD_CHANGE_TEMPLATES: ClassVar = []
     INITIAL_PASSWORD_HASH_TEMPLATES: ClassVar = []
+
+    def get_switch_port_data(self, port: int, state: str) -> dict:
+        """Build form data for enabling/disabling a port (PORT_CTRL_MODE 1/3)."""
+        return {
+            "TYPE": "portInfo",
+            "PORT_NO": port,
+            "PORT_NAME": "",
+            "INGRESS": "NOTSET",
+            "EGRESS": "NOTSET",
+            "FLOW_CONTROL": "NOTSET",
+            "PORT_CTRL_MODE": 1 if state == "on" else 3,
+            "COLOR1G": "NOTSET",
+            "COLOR100M": "NOTSET",
+            "FREQUENCY": -1,
+            "BRIGHTNESS": "undefined",
+            "STATUS": 0,
+        }
 
     def get_switch_poe_port_data(self, poe_port: int, state: str) -> dict:
         """Fill dict with form fields for switching a PoE port."""
