@@ -72,7 +72,7 @@ PoE capable models of the GS30x series (GS305EP/EPP, GS308EP/EPP) also expose pe
 | GS308EP   | 8     | V1.0.0.10, V1.0.1.4, V2.0.0.5          |                     |
 | GS308EPP  | 8     | V1.0.1.4                               |                     |
 | GS308Ev4  | 8     | V1.0.1.3                               |                     |
-| GS316EP   | 16    | V1.0.4.4                               |                     |
+| GS316EP   | 16    | V1.0.4.4, V2.0.0.5                     |                     |
 | GS316EPP  | 16    | V1.0.4.4                               |                     |
 | JGS516PE  | 16    | V2.6.0.48                              |                     |
 | JGS24Ev2  | 24    | V2.6.0.48                              |                     |
@@ -140,4 +140,6 @@ print(data["port_1_sum_rx_mbytes"])
 print(data)
 sw.turn_off_poe_port(1)  # Supported only on PoE capable models
 sw.turn_on_poe_port(1)
+sw.turn_off_port(1)  # Supported only on models with port switching
+sw.turn_on_port(1)
 ```
