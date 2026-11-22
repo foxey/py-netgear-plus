@@ -1,6 +1,7 @@
 """Unit tests for the py_netgear_plus __init__ module."""
 
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
@@ -1614,3 +1615,22 @@ def test_get_port_infos_gs308ep() -> None:
 
 if __name__ == "__main__":
     pytest.main()
+
+
+def test_gs105pe_switch_metadata_without_bootloader_row() -> None:
+    """A switch info page without a bootloader row must not fail parsing."""
+    content = Path("pages/GS105PE/0/switch_info.cgi").read_text()
+    stripped = re.sub(
+        r"<tr>\s*<td[^>]*>Bootloader Version</td>.*?</tr>",
+        "",
+        content,
+        flags=re.DOTALL,
+    )
+    assert "Bootloader Version" not in stripped
+    page = Mock()
+    page.content = stripped
+
+    metadata = create_page_parser(GS105PE.MODEL_NAME).parse_switch_metadata(page)
+
+    assert metadata["switch_bootloader"] == "unknown"
+    assert metadata["switch_firmware"] == "V1.6.0.17"
