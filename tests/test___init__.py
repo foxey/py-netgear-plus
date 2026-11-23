@@ -1613,13 +1613,19 @@ def test_get_port_infos_gs308ep() -> None:
     assert infos[5]["connection_speed"] == 0
 
 
-if __name__ == "__main__":
-    pytest.main()
-
-
-def test_gs105pe_switch_metadata_without_bootloader_row() -> None:
+@pytest.mark.parametrize(
+    ("switch_model", "firmware"),
+    [
+        (GS105Ev2, "V1.6.0.15"),
+        (GS105PE, "V1.6.0.17"),
+        (GS305E, "V1.0.0.16"),
+    ],
+)
+def test_switch_metadata_without_bootloader_row(
+    switch_model: type[AutodetectedSwitchModel], firmware: str
+) -> None:
     """A switch info page without a bootloader row must not fail parsing."""
-    content = Path("pages/GS105PE/0/switch_info.cgi").read_text()
+    content = Path(f"pages/{switch_model.MODEL_NAME}/0/switch_info.cgi").read_text()
     stripped = re.sub(
         r"<tr>\s*<td[^>]*>Bootloader Version</td>.*?</tr>",
         "",
@@ -1630,7 +1636,11 @@ def test_gs105pe_switch_metadata_without_bootloader_row() -> None:
     page = Mock()
     page.content = stripped
 
-    metadata = create_page_parser(GS105PE.MODEL_NAME).parse_switch_metadata(page)
+    metadata = create_page_parser(switch_model.MODEL_NAME).parse_switch_metadata(page)
 
     assert metadata["switch_bootloader"] == "unknown"
-    assert metadata["switch_firmware"] == "V1.6.0.17"
+    assert metadata["switch_firmware"] == firmware
+
+
+if __name__ == "__main__":
+    pytest.main()
