@@ -455,9 +455,14 @@ class GS105Ev2(PageParser):
             tree, '//td[contains(text(),"Firmware Version")]'
         )
 
-        self._switch_bootloader = get_text_from_next_element(
-            tree, '//td[contains(text(),"Bootloader Version")]'
-        )
+        # Some units do not list the bootloader on the switch info page
+        # (seen on a GS105PE updated to V1.6.0.17 through the TFTP loader).
+        try:
+            self._switch_bootloader = get_text_from_next_element(
+                tree, '//td[contains(text(),"Bootloader Version")]'
+            )
+        except NetgearPlusPageParserError:
+            self._switch_bootloader = "unknown"
 
         return {
             "switch_name": switch_name,
